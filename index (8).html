@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>Flipbook Engine — StPageFlip Build</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Real page-turn physics engine (MIT license, zero dependencies, self-hostable —
+     download this file locally for the production build instead of relying on the CDN). -->
+<script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
+<style>
+  :root{
+    --brass: #b98d4a;
+  }
+  html,body{
+    height:100%;
+    background:#171512;
+    background-image:
+      radial-gradient(ellipse at 50% -10%, rgba(185,141,74,0.10), transparent 55%),
+      repeating-linear-gradient(45deg, rgba(255,255,255,0.015) 0px, rgba(255,255,255,0.015) 1px, transparent 1px, transparent 3px);
+  }
+  .app-shell{
+    min-height: 100vh;
+    min-height: 100dvh;
+    display:flex;
+    flex-direction:column;
+  }
+  #mainArea{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    min-height:0;
+  }
+  .main-inner{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:1.25rem;
+    min-height:0;
+    width:100%;
+  }
+  .font-display{ font-family: 'Iowan Old Style','Palatino Linotype', Georgia, serif; }
+
+  .stage-wrapper{
+    display:flex; align-items:center; justify-content:center;
+    width:100%; flex:1; min-height:0;
+  }
+  .stage{
+    position:relative;
+    /* Sized in JS via computePageSize()/buildFlip() to exact fixed pixel
+       dimensions matching what's passed to StPageFlip's config. */
+  }
+  #book{
+    position:relative;
+    width:100%;
+    height:100%;
+    /* CRITICAL: StPageFlip renders its pages as absolutely-positioned
+       children of this element inside its own overflow:hidden wrapper.
+       Without an explicit size here, #book collapses to 0×0 and every
+       page it draws gets clipped out of view — this is what was
+       causing the blank screen, not the flip animation itself. */
+  }
+
+  /* ---------- PAGE CONTENT (the source elements StPageFlip clones/manages) ---------- */
+  .page{
+    width:420px; height:580px; /* design-reference size, matches the PageFlip width/height config */
+    background:#efe8d8;
+    position:relative;
+    overflow:hidden;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
+  }
+  .page[data-density="hard"]{
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08), 0 18px 45px -12px rgba(0,0,0,.6);
+  }
+  .page img{
+    width:100%; height:100%; object-fit:cover; display:block;
+    user-select:none; -webkit-user-drag:none; pointer-events:none;
+  }
+  .page-caption{
+    position:absolute; bottom:0; left:0; right:0;
+    padding: 10px 16px;
+    font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    color: rgba(23,21,18,.55);
+    background: linear-gradient(to top, rgba(239,232,216,.92), transparent);
+  }
+  .cover-title{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding: 8%;
+    background: linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.55));
+  }
+
+  .mode-btn{ color: rgba(214,211,209,.55); }
+  .mode-btn.active{ background: var(--brass); color:#171512; font-weight:600; }
+
+  .controls-row{ padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+  body.is-fullscreen{ background:#0e0c0a; }
+  body.is-fullscreen header,
+  body.is-fullscreen .controls-row{
+    opacity:.001; pointer-events:none; transition: opacity 220ms ease;
+  }
+  body.is-fullscreen:hover header,
+  body.is-fullscreen:hover .controls-row,
+  body.is-fullscreen .controls-row:hover{
+    opacity:1; pointer-events:auto;
+  }
+
+  #errorBanner{
+    display:none;
+    max-width:520px; margin:1.5rem auto; padding:1rem 1.25rem;
+    border:1px solid rgba(220,120,120,.4); border-radius:.5rem;
+    background:rgba(120,30,30,.15); color:#f3caca; font-size:13px; line-height:1.5;
+  }
+</style>
+</head>
+<body class="app-shell flex flex-col text-stone-200">
+
+  <header class="w-full px-6 py-5 flex items-center justify-between border-b border-white/5">
+    <div class="flex items-baseline gap-3">
+      <h1 class="font-display text-xl tracking-wide text-stone-100">Alex &amp; Priya</h1>
+      <span class="text-[11px] uppercase tracking-[0.2em] text-[--brass]">StPageFlip Build</span>
+    </div>
+    <div class="text-[11px] uppercase tracking-[0.2em] text-stone-500" id="pageIndicator">Cover</div>
+  </header>
+
+  <main class="flex-1 flex flex-col items-center justify-center px-4 py-6" id="mainArea">
+    <div id="errorBanner"></div>
+    <div class="main-inner w-full max-w-6xl">
+
+      <div class="stage-wrapper" id="stageWrapper">
+        <div class="stage" id="stage">
+          <div id="book"></div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-4 controls-row" id="controlsRow">
+        <div class="flex items-center gap-1 rounded-full border border-white/15 p-1" id="modeToggle">
+          <button data-mode="single" class="mode-btn px-3 py-1.5 rounded-full text-[11px] uppercase tracking-wider transition-colors">Single</button>
+          <button data-mode="double" class="mode-btn px-3 py-1.5 rounded-full text-[11px] uppercase tracking-wider transition-colors">Double</button>
+        </div>
+        <div class="w-px h-6 bg-white/10"></div>
+        <button id="prevBtn" class="w-11 h-11 rounded-full border border-white/15 flex items-center justify-center hover:border-[--brass] hover:text-[--brass] transition-colors" aria-label="Previous page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <span class="text-xs text-stone-500 tracking-wide select-none">drag any corner, or use the arrows</span>
+        <button id="nextBtn" class="w-11 h-11 rounded-full border border-white/15 flex items-center justify-center hover:border-[--brass] hover:text-[--brass] transition-colors" aria-label="Next page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+        <div class="w-px h-6 bg-white/10 mx-1"></div>
+        <button id="fullscreenBtn" class="w-11 h-11 rounded-full border border-white/15 flex items-center justify-center hover:border-[--brass] hover:text-[--brass] transition-colors" aria-label="Toggle fullscreen">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+        </button>
+      </div>
+
+    </div>
+  </main>
+
+<script>
+(() => {
+  'use strict';
+
+  const errorBanner = document.getElementById('errorBanner');
+
+  if (!window.St || !window.St.PageFlip) {
+    errorBanner.style.display = 'block';
+    errorBanner.textContent = 'Could not load the page-flip engine from the CDN — check your internet connection and reload. (This prototype loads it remotely; the production build should bundle it locally so the whole app works fully offline.)';
+    return;
+  }
+
+  /* ============================================================
+     CONTENT MODEL — self-contained inline SVG placeholders, zero
+     network dependency. Swap `img` for your processed WebP tile
+     URLs later; this is the shape config.json will eventually feed.
+  ============================================================ */
+  function placeholderArt(label, colorA, colorB) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="${colorA}"/>
+          <stop offset="100%" stop-color="${colorB}"/>
+        </linearGradient>
+      </defs>
+      <rect width="900" height="1200" fill="url(#g)"/>
+      <text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle"
+            font-family="Georgia, 'Iowan Old Style', serif" font-size="56" fill="rgba(255,255,255,0.82)">${label}</text>
+    </svg>`;
+    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  }
+
+  /* One entry per physical page (StPageFlip treats each page individually —
+     no more manual front/back leaf bookkeeping on our side). */
+  const PAGES = [
+    { hard:true,  img:placeholderArt('Front Cover', '#5c1f2a', '#2a0f14'), title:'Alex & Priya — June 14, 2026' },
+    { hard:false, img:placeholderArt('Page 1', '#4a3c2e', '#2b241c'), caption:'Page 1 — Getting Ready' },
+    { hard:false, img:placeholderArt('Page 2', '#3e4a3a', '#242c22'), caption:'Page 2' },
+    { hard:false, img:placeholderArt('Page 3', '#3a4550', '#232a30'), caption:'Page 3' },
+    { hard:false, img:placeholderArt('Page 4', '#4d3a2e', '#2c221b'), caption:'Page 4' },
+    { hard:false, img:placeholderArt('Page 5', '#4a3242', '#2a1c26'), caption:'Page 5' },
+    { hard:false, img:placeholderArt('Page 6', '#33474a', '#1e2a2c'), caption:'Page 6' },
+    { hard:false, img:placeholderArt('Page 7', '#4a4030', '#2b251c'), caption:'Page 7' },
+    { hard:false, img:placeholderArt('Page 8', '#3e3a4d', '#23212c'), caption:'Page 8 — First Dance' },
+    { hard:true,  img:placeholderArt('Back Cover', '#5c1f2a', '#2a0f14'), title:'Thank You For Celebrating With Us' },
+  ];
+
+  let bookEl = document.getElementById('book');
+  const stage = document.getElementById('stage');
+  const stageWrapper = document.getElementById('stageWrapper');
+  const mainArea = document.getElementById('mainArea');
+  const pageIndicator = document.getElementById('pageIndicator');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const fullscreenBtn = document.getElementById('fullscreenBtn');
+  const modeBtns = Array.from(document.querySelectorAll('.mode-btn'));
+
+  /* Build the source <div class="page"> elements StPageFlip will read via loadFromHTML.
+     Kept in this array (not just appended to #book) because StPageFlip's destroy()
+     removes its root element from the document entirely — see buildFlip() below,
+     which recreates #book from scratch on every rebuild and needs these elements
+     ready to re-attach. */
+  const pageEls = PAGES.map((p) => {
+    const el = document.createElement('div');
+    el.className = 'page';
+    if (p.hard) el.dataset.density = 'hard';
+
+    const img = document.createElement('img');
+    img.src = p.img;
+    img.draggable = false;
+    el.appendChild(img);
+
+    if (p.title) {
+      const cover = document.createElement('div');
+      cover.className = 'cover-title';
+      cover.innerHTML = `<h2 class="font-display text-2xl md:text-3xl text-white drop-shadow-lg">${p.title}</h2>
+                          <div class="mt-3 w-10 h-px bg-[--brass]"></div>`;
+      el.appendChild(cover);
+    } else if (p.caption) {
+      const cap = document.createElement('div');
+      cap.className = 'page-caption';
+      cap.textContent = p.caption;
+      el.appendChild(cap);
+    }
+
+    return el;
+  });
+  pageEls.forEach((el) => bookEl.appendChild(el));
+
+  const PAGE_W = 420, PAGE_H = 580; // design-reference page size, matches .page CSS above
+
+  let mode = 'single'; // 'single' | 'double' — forced, not auto-detected
+  let pageFlip = null;
+
+  /* ============================================================
+     RESPONSIVE SIZING — compute the exact pixel size for a single
+     page that fits the available space (accounting for whether
+     we're showing one page or a two-page spread), then pass that
+     directly to StPageFlip as fixed pixel dimensions. We already
+     destroy-and-rebuild the book on every resize/mode change, so we
+     don't need the library's own dynamic "stretch" scaling on top
+     of that — fixed sizing is simpler and matches the most basic
+     usage pattern in StPageFlip's own docs.
+  ============================================================ */
+  function computePageSize() {
+    const wrapRect = stageWrapper.getBoundingClientRect();
+    const availW = Math.max(240, wrapRect.width - 24);
+    const availH = Math.max(240, wrapRect.height - 24);
+
+    const factor = mode === 'double' ? 2 : 1; // a spread needs room for two pages side by side
+    const aspect = PAGE_W / PAGE_H;
+
+    let pageW = availW / factor;
+    let pageH = pageW / aspect;
+    if (pageH > availH) {
+      pageH = availH;
+      pageW = pageH * aspect;
+    }
+    pageW = Math.min(pageW, 550);
+    pageH = Math.min(pageH, 760);
+
+    return { pageW: Math.round(pageW), pageH: Math.round(pageH) };
+  }
+
+  /* ============================================================
+     BUILD / REBUILD THE BOOK
+     StPageFlip doesn't expose a live "force single vs spread"
+     toggle, so we destroy and recreate the instance when the mode
+     changes or the viewport resizes — cheap for a static album,
+     and we restore the reader's current page so it feels seamless.
+     `usePortrait` + a portrait-shaped container together force
+     single-page mode; a wide container + usePortrait:false forces
+     the spread and never collapses back to single.
+  ============================================================ */
+  function buildFlip(startPage) {
+    if (pageFlip) {
+      try { pageFlip.destroy(); } catch (err) { /* no-op */ }
+      // IMPORTANT: StPageFlip's destroy() removes its root element (bookEl) from
+      // the document entirely — it doesn't just clear its contents. Reusing the
+      // same (now-detached) bookEl and re-querying `#book .page` here is what was
+      // causing the blank/non-interactive book on every rebuild (mode toggle,
+      // window resize, orientation/fullscreen change — including a resize some
+      // browsers fire shortly after initial load). So we rebuild #book from
+      // scratch each time and re-attach the page elements to the new one.
+      bookEl = document.createElement('div');
+      bookEl.id = 'book';
+      pageEls.forEach((el) => bookEl.appendChild(el));
+      stage.appendChild(bookEl);
+    }
+
+    const { pageW, pageH } = computePageSize();
+    const totalW = pageW * (mode === 'double' ? 2 : 1);
+
+    stage.style.width = `${totalW}px`;
+    stage.style.height = `${pageH}px`;
+    bookEl.style.width = stage.style.width;
+    bookEl.style.height = stage.style.height;
+
+    pageFlip = new St.PageFlip(bookEl, {
+      width: pageW,
+      height: pageH,
+      size: 'fixed',
+      autoSize: false,          // we size #stage/#book ourselves; leaving this at its
+                                 // default (true) makes the library override our width
+                                 // back to 100%/2x on every rebuild, which fights our
+                                 // own fixed-size layout
+      showCover: true,          // cover + back cover shown alone, not paired in a spread
+      usePortrait: mode === 'single',
+      maxShadowOpacity: 0.65,
+      flippingTime: 650,
+      mobileScrollSupport: true,
+      swipeDistance: 25,
+      startPage: startPage || 0,
+    });
+
+    pageFlip.loadFromHTML(pageEls);
+    pageFlip.on('flip', updateIndicator);
+    pageFlip.on('init', updateIndicator);
+
+    updateIndicator();
+  }
+
+  function updateIndicator() {
+    if (!pageFlip) return;
+    const idx = pageFlip.getCurrentPageIndex();
+    const count = pageFlip.getPageCount();
+    if (idx === 0) pageIndicator.textContent = 'Cover';
+    else if (idx === count - 1) pageIndicator.textContent = 'Back Cover';
+    else pageIndicator.textContent = `Page ${idx}`;
+
+    prevBtn.disabled = idx === 0;
+    nextBtn.disabled = idx === count - 1;
+    prevBtn.style.opacity = prevBtn.disabled ? .3 : 1;
+    nextBtn.style.opacity = nextBtn.disabled ? .3 : 1;
+  }
+
+  /* ============================================================
+     MODE TOGGLE / NAV / FULLSCREEN / RESPONSIVE REBUILD
+  ============================================================ */
+  function setMode(next) {
+    if (next === mode) return;
+    const keepPage = pageFlip ? pageFlip.getCurrentPageIndex() : 0;
+    mode = next;
+    modeBtns.forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    buildFlip(keepPage);
+  }
+  modeBtns.forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+  prevBtn.addEventListener('click', () => pageFlip && pageFlip.flipPrev());
+  nextBtn.addEventListener('click', () => pageFlip && pageFlip.flipNext());
+  window.addEventListener('keydown', (e) => {
+    if (!pageFlip) return;
+    if (e.key === 'ArrowRight') pageFlip.flipNext();
+    if (e.key === 'ArrowLeft') pageFlip.flipPrev();
+  });
+
+  let resizeTimer;
+  function rebuildKeepingPage() {
+    const keepPage = pageFlip ? pageFlip.getCurrentPageIndex() : 0;
+    buildFlip(keepPage);
+  }
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(rebuildKeepingPage, 150);
+  });
+  window.addEventListener('orientationchange', rebuildKeepingPage);
+  document.addEventListener('fullscreenchange', () => {
+    document.body.classList.toggle('is-fullscreen', !!document.fullscreenElement);
+    rebuildKeepingPage();
+  });
+  fullscreenBtn.addEventListener('click', () => {
+    if (!document.fullscreenElement) mainArea.requestFullscreen?.().catch(() => {});
+    else document.exitFullscreen?.();
+  });
+
+  modeBtns.forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+  buildFlip(0);
+})();
+</script>
+</body>
+</html>
