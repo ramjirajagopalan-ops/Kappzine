@@ -1,0 +1,17 @@
+services:
+  kappzine:
+    build: .
+    ports:
+      - '3000:3000'
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: file:/app/data/prod.db
+    volumes:
+      - kappzine-data:/app/data
+      - kappzine-uploads:/app/public/uploads
+    restart: unless-stopped
+
+volumes:
+  kappzine-data:
+  kappzine-uploads:

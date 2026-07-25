@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.kz-stage-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+}
+
+.kz-stage {
+  position: relative;
+}
+
+.kz-book {
+  position: relative;
+}
+
+.kz-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+}
+
+.kz-page {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.kz-page[data-density='hard'] {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1), 0 18px 45px -12px rgba(0, 0, 0, 0.6);
+}
+
+.kz-page img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+.kz-page-caption {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 10px 16px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.75;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.28), transparent);
+  color: #fff;
+}
+
+.kz-cover-title {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 8%;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.55));
+}
+
+.kz-cover-title h2 {
+  color: #fff;
+  font-size: clamp(1.25rem, 3vw, 1.85rem);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+.kz-cover-rule {
+  margin-top: 0.75rem;
+  width: 2.5rem;
+  height: 1px;
+}
+
+.kz-hotspot {
+  position: absolute;
+  border: 1.5px dashed rgba(255, 255, 255, 0.85);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.kz-hotspot:hover {
+  background: rgba(0, 0, 0, 0.18);
+  transform: scale(1.02);
+}
+
+.kz-hotspot-icon {
+  width: 2rem;
+  height: 2rem;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #171512;
+  font-size: 0.85rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.stf__parent {
+  touch-action: none;
+}
