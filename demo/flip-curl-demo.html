@@ -1,0 +1,550 @@
+<title>Kappzine — Flip Demo</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f4f4f4;
+    --ink: #1a1a1a;
+    --muted: #6b6b6b;
+    --accent: #b98d4a;
+    --line: rgba(0, 0, 0, 0.12);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%; margin: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  .display { font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif; }
+  .shell { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+  header { padding: 22px clamp(16px,4vw,40px) 6px; display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; flex: 0 0 auto; }
+  .brand { display: flex; align-items: baseline; gap: 10px; }
+  .brand .mark { font-size: 20px; }
+  .brand .tag { font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); border: 1px solid rgba(185,141,74,.35); padding: 3px 8px; border-radius: 999px; }
+  .subhead { max-width: 620px; margin: 2px clamp(16px,4vw,40px) 0; font-size: 13px; line-height: 1.5; color: var(--muted); flex: 0 0 auto; }
+  main { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 0; padding: 14px clamp(12px,4vw,40px) 6px; gap: 10px; }
+  .stage-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; flex: 1 1 auto; min-height: 0; position: relative; }
+  #stageCanvas { touch-action: none; cursor: grab; box-shadow: 0 30px 90px -20px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.04); border-radius: 2px; max-width: 100%; max-height: 100%; }
+  #stageCanvas:active { cursor: grabbing; }
+  .corner-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border-radius: 999px; border: 1px solid var(--line); background: #ffffff; color: var(--ink); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: border-color .16s, color .16s, opacity .16s; z-index: 5; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+  .corner-nav:hover { border-color: var(--accent); color: var(--accent); }
+  .corner-nav:disabled { opacity: .3; cursor: default; border-color: var(--line); color: var(--ink); }
+  .corner-nav.prev { left: 2px; } .corner-nav.next { right: 2px; }
+  .toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; padding: 2px 6px 14px; flex: 0 0 auto; }
+  .btn { appearance: none; border: 1px solid var(--line); background: transparent; color: var(--muted); font: inherit; display: flex; align-items: center; justify-content: center; height: 34px; width: 34px; border-radius: 999px; cursor: pointer; transition: background .14s, color .14s, border-color .14s; }
+  .btn:hover { color: var(--ink); border-color: var(--accent); }
+  .btn.active { background: var(--accent); color: #17140f; border-color: var(--accent); }
+  .divider { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+  .page-count { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 96px; text-align: center; }
+  .hint { font-size: 11px; color: var(--muted); }
+  body.is-fullscreen header, body.is-fullscreen .subhead, body.is-fullscreen .toolbar { opacity: .001; pointer-events: none; transition: opacity .22s; }
+  body.is-fullscreen:hover header, body.is-fullscreen:hover .subhead, body.is-fullscreen:hover .toolbar, body.is-fullscreen .toolbar:hover { opacity: 1; pointer-events: auto; }
+</style>
+
+<div class="shell" id="shell">
+  <header>
+    <div class="brand">
+      <span class="display mark">Kappzine</span>
+      <span class="tag">Custom curl engine</span>
+    </div>
+    <span class="page-count" id="pageIndicator">Cover</span>
+  </header>
+  <p class="subhead">
+    A from-scratch canvas page turn (not a library) — grab anywhere on the page and drag; the
+    fold always spans the full height, and its lean follows wherever you drag, just like turning
+    a real page. Or use the arrows. Built and tuned against real reference recordings.
+  </p>
+
+  <main id="mainArea">
+    <div class="stage-wrapper" id="stageWrapper">
+      <button class="corner-nav prev" id="prevBtn" aria-label="Previous page">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <canvas id="stageCanvas"></canvas>
+      <button class="corner-nav next" id="nextBtn" aria-label="Next page">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+    </div>
+
+    <div class="toolbar">
+      <button class="btn" id="soundBtn" title="Flip sound"></button>
+      <button class="btn" id="fullscreenBtn" title="Fullscreen"></button>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+// ============================================================
+// Custom canvas full-height page-turn engine (no external library).
+//
+// Geometry: grab anywhere on the page; the nearest corner is used only
+// as a reference point to compute a live direction "n" (from the fold
+// line toward the pointer, recomputed every frame — this is what makes
+// the fold lean wherever you're actually dragging, not lock to one
+// fixed diagonal). The folded flap is a flat mirror reflection across
+// that fold line (reflecting guarantees the edge always lands exactly
+// at the drag point). Unlike a corner dog-ear, the reflected band is
+// NOT tapered to a point — it's filled at full width and clipped to the
+// page rectangle, so it always spans the complete height, top to
+// bottom, the way an actual magazine page turns on its spine. The
+// rounded, "premium" look comes entirely from shading: a soft highlight
+// right at the crease, darkening toward the tip, and a cast shadow — not from
+// bending the geometry itself.
+// ============================================================
+
+const PAPER_BACK = '#e9dfc8';
+
+function magazinePage(w, h, kicker, headline, accent, photoHue, pageNo) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f4efe2';
+  g.fillRect(0, 0, w, h);
+
+  const M = Math.round(w * 0.07);
+  g.fillStyle = accent;
+  g.font = '700 10px Arial, sans-serif';
+  g.save();
+  g.translate(M - 8, h - M);
+  g.rotate(-Math.PI / 2);
+  g.fillText(kicker.toUpperCase(), 0, 0);
+  g.restore();
+
+  const photoY = M, photoH = h * 0.32;
+  const grad = g.createLinearGradient(M, photoY, w - M, photoY + photoH);
+  grad.addColorStop(0, photoHue[0]);
+  grad.addColorStop(1, photoHue[1]);
+  g.fillStyle = grad;
+  g.fillRect(M, photoY, w - 2 * M, photoH);
+  g.strokeStyle = 'rgba(0,0,0,0.08)';
+  g.strokeRect(M + 0.5, photoY + 0.5, w - 2 * M - 1, photoH - 1);
+  g.fillStyle = 'rgba(0,0,0,0.12)';
+  g.beginPath();
+  g.moveTo(M, photoY + photoH);
+  g.lineTo(M + (w - 2 * M) * 0.3, photoY + photoH * 0.4);
+  g.lineTo(M + (w - 2 * M) * 0.55, photoY + photoH * 0.75);
+  g.lineTo(M + (w - 2 * M) * 0.8, photoY + photoH * 0.35);
+  g.lineTo(w - M, photoY + photoH);
+  g.closePath();
+  g.fill();
+
+  let y = photoY + photoH + h * 0.06;
+  g.fillStyle = '#221c14';
+  g.font = `700 ${Math.round(w * 0.05)}px Georgia, serif`;
+  wrapText(g, headline, M, y, w - 2 * M, w * 0.058);
+  y += h * 0.1;
+
+  g.strokeStyle = accent;
+  g.lineWidth = 2;
+  g.beginPath(); g.moveTo(M, y); g.lineTo(M + 32, y); g.stroke();
+  y += 18;
+
+  const lineH = h * 0.02;
+  let seed = pageNo * 977 + 1;
+  const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  g.fillStyle = 'rgba(34,28,20,0.55)';
+  while (y < h - M - 20) {
+    if (rand() < 0.12) { y += lineH * 0.6; continue; }
+    g.fillRect(M, y, (w - 2 * M) * (0.65 + rand() * 0.35), 2.4);
+    y += lineH;
+  }
+
+  g.fillStyle = 'rgba(34,28,20,0.4)';
+  g.font = '600 10px Arial, sans-serif';
+  g.textAlign = 'right';
+  g.fillText(String(pageNo).padStart(2, '0'), w - M, h - M + 4);
+  return c;
+}
+
+function wrapText(g, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(' ');
+  let line = '';
+  for (const word of words) {
+    const test = line ? line + ' ' + word : word;
+    if (g.measureText(test).width > maxWidth && line) {
+      g.fillText(line, x, y);
+      line = word;
+      y += lineHeight;
+    } else line = test;
+  }
+  if (line) g.fillText(line, x, y);
+}
+
+function coverArt(w, h, label, sub) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, w, h);
+  grad.addColorStop(0, '#5c3a1f'); grad.addColorStop(1, '#2a170c');
+  g.fillStyle = grad; g.fillRect(0, 0, w, h);
+  g.fillStyle = 'rgba(255,255,255,0.05)';
+  for (let i = 0; i < h; i += 3) g.fillRect(0, i, w, 1);
+  g.fillStyle = 'rgba(243,236,219,0.92)';
+  g.font = `600 ${Math.round(w * 0.09)}px Georgia, serif`;
+  g.textAlign = 'center';
+  g.fillText(label, w / 2, h / 2);
+  g.fillStyle = 'rgba(243,236,219,0.55)';
+  g.font = `${Math.round(w * 0.038)}px Georgia, serif`;
+  g.fillText(sub, w / 2, h / 2 + w * 0.07);
+  return c;
+}
+
+const ARTICLES = [
+  { kicker: 'Workshop', headline: 'Notes on building a reading room from scratch', accent: '#b2542f', hue: ['#cfae86', '#8f6a45'] },
+  { kicker: 'Field Study', headline: 'What makes a page feel like paper', accent: '#3d6e63', hue: ['#9db9ad', '#4f6e63'] },
+  { kicker: 'Interview', headline: 'Slow reading in a fast feed', accent: '#5a5a8c', hue: ['#a7a7c9', '#5c5c86'] },
+  { kicker: 'Archive', headline: 'A short history of the folded sheet', accent: '#a0762f', hue: ['#d8bd8a', '#8a6a3d'] },
+  { kicker: 'Field Notes', headline: 'On corners, creases, and cylinders', accent: '#496a8c', hue: ['#a9c2d8', '#4e6f8c'] },
+];
+
+// Solid, unmistakably distinct colours per page (instead of the magazine
+// mockup) so it's obvious at a glance whether the page showing through
+// during a drag is actually the next one, not a rendering artifact.
+const DEBUG_COLORS = ['#c0392b', '#2980b9', '#27ae60', '#f39c12', '#8e44ad', '#16a085'];
+function debugPage(w, h, index, label) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.fillStyle = DEBUG_COLORS[index % DEBUG_COLORS.length];
+  g.fillRect(0, 0, w, h);
+  g.fillStyle = 'rgba(255,255,255,0.9)';
+  g.font = `700 ${Math.round(w * 0.28)}px Arial, sans-serif`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(String(index), w / 2, h * 0.42);
+  g.font = `600 ${Math.round(w * 0.06)}px Arial, sans-serif`;
+  g.fillText(label, w / 2, h * 0.58);
+  // Corner + edge markers so it's also obvious which physical edge of the
+  // page is on screen (useful once things start rotating/mirroring).
+  g.font = `600 ${Math.round(w * 0.045)}px Arial, sans-serif`;
+  g.fillStyle = 'rgba(255,255,255,0.85)';
+  g.textAlign = 'left'; g.fillText('TL', w * 0.04, h * 0.06);
+  g.textAlign = 'right'; g.fillText('TR', w * 0.96, h * 0.06);
+  g.textAlign = 'left'; g.fillText('BL', w * 0.04, h * 0.96);
+  g.textAlign = 'right'; g.fillText('BR', w * 0.96, h * 0.96);
+  return c;
+}
+
+const canvas = document.getElementById('stageCanvas');
+const ctx = canvas.getContext('2d');
+const stageWrapper = document.getElementById('stageWrapper');
+const pageIndicator = document.getElementById('pageIndicator');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const soundBtn = document.getElementById('soundBtn');
+const fullscreenBtn = document.getElementById('fullscreenBtn');
+const mainArea = document.getElementById('mainArea');
+
+const ICONS = {
+  soundOn: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+  soundOff: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>',
+  expand: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>',
+  compress: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>',
+};
+
+let W = 0, H = 0;
+let PAGES = [];
+let currentIndex = 0;
+let d = 0; // corner-peel reach in px (0 = flat)
+let curN = { x: Math.SQRT1_2, y: Math.SQRT1_2 }; // live fold direction, tracks the pointer during a drag
+let dragging = false;
+let animId = null;
+let soundOn = true;
+let audioCtx = null;
+
+function playFlipSound() {
+  if (!soundOn) return;
+  try {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return;
+    if (!audioCtx) audioCtx = new Ctor();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const duration = 0.26;
+    const size = Math.floor(audioCtx.sampleRate * duration);
+    const buffer = audioCtx.createBuffer(1, size, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < size; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / size, 2.2);
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = buffer;
+    const band = audioCtx.createBiquadFilter();
+    band.type = 'bandpass'; band.frequency.value = 2200; band.Q.value = 0.6;
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    noise.connect(band).connect(gain).connect(audioCtx.destination);
+    noise.start(); noise.stop(audioCtx.currentTime + duration);
+  } catch (e) { /* no-op */ }
+}
+
+function buildPages() {
+  PAGES = [];
+  for (let i = 0; i < 6; i++) PAGES.push(debugPage(W, H, i, `PAGE ${i}`));
+}
+
+function pageImg(i) {
+  return PAGES[Math.max(0, Math.min(PAGES.length - 1, i))];
+}
+
+// The anchor is wherever the reader actually grabbed the edge — NOT
+// snapped to the nearest page corner. Anchoring to a corner meant a grab
+// at mid-height (a normal, common grab point) measured its "reach"
+// against a corner that could be 300+ px away vertically before any
+// horizontal drag happened at all, so the fold ballooned to a huge size
+// immediately and leaned almost entirely vertical instead of tracking
+// the drag. Anchoring to {edgeX, grabY} keeps a horizontal drag's reach
+// close to the actual horizontal distance moved, which is what a real
+// page does.
+let anchorPoint = { x: 0, y: 0 };
+let anchorDir = 1; // 1 = right edge (next), -1 = left edge (prev)
+
+// Fills the local-space band between lx=lo and lx=hi across the WHOLE
+// page height (no taper to a point) — the fold line is straight, at
+// whatever angle the pointer is currently at, but the folded flap always
+// covers the page's full height, like an actual magazine page turning
+// on its spine, not a corner dog-ear. The band is drawn oversized in the
+// ly direction and relies on the caller's page-rect clip to trim it —
+// simpler and more robust than computing exactly where the (rotated)
+// fold line crosses the top/bottom edges by hand.
+function fillBandLocal(hi, lo = 0) {
+  const BIG = 4000; // comfortably larger than any page diagonal we'll render
+  ctx.fillRect(Math.min(lo, hi), -BIG, Math.abs(hi - lo), BIG * 2);
+}
+
+// Renders a full-height page fold as a flat mirror-fold — the reflected
+// edge lands exactly at the drag point, direction tracks the pointer
+// live, and the flap always spans the complete page height. The
+// rounded, "premium" impression comes entirely from shading: a soft
+// highlight right at the crease, darkening toward the tip, and a cast
+// shadow — not from bending the geometry itself.
+function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
+  // The next page is the base layer for the WHOLE canvas — it must be
+  // visible the instant the flap starts lifting, not just once the flap
+  // reaches the far edge. The previous version only ever drew the front
+  // page and painted the folded band a flat paper colour on top, so
+  // there was nothing else to reveal until the animation finished.
+  ctx.drawImage(nextImg, 0, 0);
+  if (dd <= 0.5) {
+    ctx.drawImage(frontImg, 0, 0);
+    return;
+  }
+
+  const F = { x: anchor.x - dd * n.x, y: anchor.y - dd * n.y };
+  const angle = Math.atan2(n.y, n.x);
+  const perp = { x: -n.y, y: n.x };
+  const BIG = 4000;
+
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+
+  // Current page, but only in the region the fold hasn't reached yet —
+  // clipped to the half-plane on the -n side of the fold line (toward the
+  // spine, away from the edge being dragged), in plain (unrotated)
+  // coordinates so drawImage places it at its normal spot. The dragged
+  // edge's side of the line is the flap (handled below) and, beyond that,
+  // the next page showing through — neither should get the front page.
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(F.x + perp.x * BIG, F.y + perp.y * BIG);
+  ctx.lineTo(F.x + perp.x * BIG - n.x * BIG, F.y + perp.y * BIG - n.y * BIG);
+  ctx.lineTo(F.x - perp.x * BIG - n.x * BIG, F.y - perp.y * BIG - n.y * BIG);
+  ctx.lineTo(F.x - perp.x * BIG, F.y - perp.y * BIG);
+  ctx.closePath();
+  ctx.clip();
+  ctx.drawImage(frontImg, 0, 0);
+  ctx.restore();
+
+  // The folded flap itself (paper-back + shading), worked out in the
+  // fold's own local frame as before.
+  ctx.save();
+  ctx.translate(F.x, F.y);
+  ctx.rotate(angle);
+
+  // Shadow the lifted flap casts onto the next page now showing through
+  // beyond it — drawn first so the flap's own colour sits on top of it.
+  const gShadow = ctx.createLinearGradient(-dd - 50, 0, -dd, 0);
+  gShadow.addColorStop(0, 'rgba(0,0,0,0)');
+  gShadow.addColorStop(1, 'rgba(0,0,0,0.35)');
+  ctx.fillStyle = gShadow;
+  fillBandLocal(-dd, -dd - 50);
+
+  ctx.fillStyle = PAPER_BACK;
+  fillBandLocal(0, -dd);
+
+  const g1 = ctx.createLinearGradient(0, 0, -18, 0);
+  g1.addColorStop(0, 'rgba(255,255,255,0.45)');
+  g1.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g1;
+  fillBandLocal(0, -18);
+
+  const g2 = ctx.createLinearGradient(-18, 0, -dd, 0);
+  g2.addColorStop(0, 'rgba(0,0,0,0)');
+  g2.addColorStop(0.6, 'rgba(0,0,0,0.28)');
+  g2.addColorStop(1, 'rgba(0,0,0,0.5)');
+  ctx.fillStyle = g2;
+  fillBandLocal(-18, -dd);
+
+  // Cast shadow the flap drops onto the still-flat page next to the
+  // crease itself (distinct from the "next page" shadow above).
+  const g3 = ctx.createLinearGradient(0, 0, 35, 0);
+  g3.addColorStop(0, 'rgba(0,0,0,0.32)');
+  g3.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g3;
+  fillBandLocal(35, 0);
+
+  ctx.restore();
+  ctx.restore();
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  if (d >= Math.hypot(W, H) - 1) {
+    ctx.drawImage(pageImg(currentIndex + anchorDir), 0, 0);
+  } else {
+    renderCornerCurl(pageImg(currentIndex), pageImg(currentIndex + anchorDir), d, anchorPoint, curN);
+  }
+  updateIndicator();
+}
+
+function updateIndicator() {
+  const count = PAGES.length;
+  if (currentIndex === 0 && d < 1) pageIndicator.textContent = 'Cover';
+  else if (currentIndex >= count - 1 && d < 1) pageIndicator.textContent = 'Back page';
+  else pageIndicator.textContent = `Page ${currentIndex} / ${count - 1}`;
+  prevBtn.disabled = currentIndex <= 0 && d <= 0.5;
+  nextBtn.disabled = currentIndex >= PAGES.length - 1 && d <= 0.5;
+}
+
+function animateD(target, duration, dir) {
+  cancelAnimationFrame(animId);
+  const start = d;
+  const t0 = performance.now();
+  function step(now) {
+    const p = Math.min(1, (now - t0) / duration);
+    const eased = 1 - Math.pow(1 - p, 3);
+    d = start + (target - start) * eased;
+    render();
+    if (p < 1) {
+      animId = requestAnimationFrame(step);
+    } else {
+      if (target >= maxD() - 1) {
+        currentIndex = Math.max(0, Math.min(PAGES.length - 1, currentIndex + dir));
+        playFlipSound();
+      }
+      d = 0;
+      render();
+    }
+  }
+  animId = requestAnimationFrame(step);
+}
+
+function maxD() { return Math.hypot(W, H); }
+
+function resize() {
+  const rect = stageWrapper.getBoundingClientRect();
+  const aspect = 380 / 540;
+  let w = rect.width - 90, h = rect.height;
+  if (w / h > aspect) w = h * aspect; else h = w / aspect;
+  w = Math.min(w, 460); h = Math.min(h, 660);
+  W = Math.round(w); H = Math.round(h);
+  canvas.width = W; canvas.height = H;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  buildPages();
+  render();
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  // A real page can only be grabbed at its outer edge — not picked up
+  // from the middle of the sheet. Restrict drag-initiation to a margin
+  // along the left/right edges; clicks elsewhere on the page do nothing.
+  const EDGE_ZONE = Math.max(50, W * 0.22);
+  const nearRightEdge = x > W - EDGE_ZONE;
+  const nearLeftEdge = x < EDGE_ZONE;
+  if (!nearRightEdge && !nearLeftEdge) return;
+  const dir = nearRightEdge ? 1 : -1;
+  if (dir === 1 && currentIndex >= PAGES.length - 1) return;
+  if (dir === -1 && currentIndex <= 0) return;
+  cancelAnimationFrame(animId);
+  // Anchor to wherever the reader actually grabbed the edge (this exact
+  // y), not a corner — see the note above anchorPoint's declaration.
+  anchorPoint = { x: nearRightEdge ? W : 0, y };
+  anchorDir = dir;
+  curN = { x: dir, y: 0 };
+  dragging = true;
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  // n must point FROM the fold line TOWARD the anchor, i.e. from the
+  // pointer back to the anchor point — not anchor-to-pointer (that
+  // direction is backwards and sends the fold line's origin outside the
+  // page entirely, which looked like no fold rendering at all).
+  const vx = anchorPoint.x - x, vy = anchorPoint.y - y;
+  const len = Math.hypot(vx, vy);
+  d = Math.max(0, Math.min(maxD(), len));
+  // The fold direction tracks the pointer live: drag straight toward the
+  // spine and it stays a clean vertical fold; drag up or down while
+  // pulling and it leans, same as a real page.
+  if (len > 1) curN = { x: vx / len, y: vy / len };
+  render();
+});
+canvas.addEventListener('pointerup', () => {
+  if (!dragging) return;
+  dragging = false;
+  if (d > maxD() * 0.45) animateD(maxD(), 260, anchorDir);
+  else animateD(0, 220, anchorDir);
+});
+canvas.addEventListener('pointerleave', () => {
+  if (!dragging) return;
+  dragging = false;
+  animateD(0, 220, anchorDir);
+});
+
+function programmaticFlip(dir) {
+  anchorPoint = { x: dir === 1 ? W : 0, y: H / 2 };
+  anchorDir = dir;
+  curN = { x: dir, y: 0 };
+  animateD(maxD(), 480, dir);
+}
+nextBtn.addEventListener('click', () => { if (currentIndex < PAGES.length - 1) programmaticFlip(1); });
+prevBtn.addEventListener('click', () => { if (currentIndex > 0) programmaticFlip(-1); });
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' && currentIndex < PAGES.length - 1) programmaticFlip(1);
+  if (e.key === 'ArrowLeft' && currentIndex > 0) programmaticFlip(-1);
+});
+
+function setSoundIcon() {
+  soundBtn.innerHTML = soundOn ? ICONS.soundOn : ICONS.soundOff;
+  soundBtn.classList.toggle('active', soundOn);
+}
+soundBtn.addEventListener('click', () => { soundOn = !soundOn; setSoundIcon(); });
+setSoundIcon();
+
+function setFsIcon() { fullscreenBtn.innerHTML = document.fullscreenElement ? ICONS.compress : ICONS.expand; }
+fullscreenBtn.addEventListener('click', () => {
+  if (!document.fullscreenElement) mainArea.requestFullscreen?.().catch(() => {});
+  else document.exitFullscreen?.();
+});
+document.addEventListener('fullscreenchange', () => {
+  document.body.classList.toggle('is-fullscreen', !!document.fullscreenElement);
+  setFsIcon();
+  setTimeout(resize, 60);
+});
+setFsIcon();
+
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(resize, 120);
+});
+
+resize();
+})();
+</script>
