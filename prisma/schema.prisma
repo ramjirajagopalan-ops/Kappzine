@@ -1,0 +1,276 @@
+// Kappzine — self-hosted flipbook platform (Heyzine-style)
+// Postgres is required (enums + json fields used throughout).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth (NextAuth / Auth.js v5 — Prisma adapter shapes)
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String? // set only for the local dev-credentials login path
+
+  // Cached Google Drive tokens, used when storageProvider = GDRIVE.
+  // Access token is short-lived; refreshToken lets the worker mint new ones.
+  googleAccessToken  String?  @db.Text
+  googleRefreshToken String?  @db.Text
+  googleTokenExpiry  DateTime?
+  driveRootFolderId  String? // "Kappzine" app folder created in the user's Drive on first connect
+
+  storageProvider StorageProviderKind @default(LOCAL)
+
+  accounts   Account[]
+  sessions   Session[]
+  flipbooks  Flipbook[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// Core domain
+// ---------------------------------------------------------------------------
+
+enum StorageProviderKind {
+  LOCAL
+  GDRIVE
+}
+
+enum FlipbookStatus {
+  DRAFT // created, original PDF not uploaded yet
+  UPLOADING
+  QUEUED
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum PrivacyMode {
+  PUBLIC // listed nowhere, but link works for anyone; indexable
+  UNLISTED // link works for anyone, not indexable (noindex)
+  PASSWORD // requires the viewer to enter a password
+  PRIVATE // owner only (must be signed in as the owner)
+}
+
+enum ViewMode {
+  SINGLE
+  DOUBLE
+  AUTO // double on wide screens, single on narrow/mobile
+}
+
+enum PageCorner {
+  ALL
+  TOP_RIGHT
+  BOTTOM_RIGHT
+}
+
+model Flipbook {
+  id          String @id @default(cuid())
+  userId      String
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String? @db.Text
+  slug        String  @unique
+
+  status       FlipbookStatus @default(DRAFT)
+  errorMessage String?        @db.Text
+
+  // Original source file
+  originalFileKey  String? // storage key for the uploaded PDF
+  originalFileName String?
+  originalFileSize Int?
+  pageCount        Int?
+  processedPages   Int      @default(0)
+
+  // Rendering
+  renderDpi Int @default(150) // quality tier chosen at creation time (96 draft / 150 standard / 220 high)
+
+  // --- Reader experience / creation options (Heyzine-style "Customize" panel) ---
+  privacy           PrivacyMode @default(UNLISTED)
+  passwordHash      String?
+  defaultViewMode   ViewMode    @default(AUTO)
+  rtl               Boolean     @default(false) // right-to-left page order (Arabic/Hebrew-style docs)
+  flipSound         Boolean     @default(true)
+  backgroundMusicKey String? // optional looping background audio
+  autoFlipEnabled   Boolean     @default(false)
+  autoFlipSeconds   Int         @default(6)
+  showToc           Boolean     @default(true) // thumbnail rail / table of contents
+  showThumbnails    Boolean     @default(true)
+  showDownloadBtn   Boolean     @default(true)
+  showShareBtn      Boolean     @default(true)
+  showPrintBtn      Boolean     @default(true)
+  allowDownload     Boolean     @default(true)
+  allowSearch       Boolean     @default(true)
+  allowZoom         Boolean     @default(true)
+  cornerFlipZones   PageCorner  @default(ALL)
+  backgroundStyle   String      @default("charcoal") // preset key: charcoal | linen | midnight | custom-color | custom-image
+  backgroundColor   String?
+  backgroundImageKey String?
+  brandLogoKey      String?
+  brandLogoLinkUrl  String?
+  accentColor       String      @default("#b98d4a")
+  pageCornerRadius  Int         @default(0)
+  hardCovers        Boolean     @default(true)
+  gaTrackingId      String? // optional external analytics id
+  seoTitle          String?
+  seoDescription    String?
+  embedAllowed      Boolean     @default(true)
+
+  pages       Page[]
+  hotspots    Hotspot[]
+  viewEvents  ViewEvent[]
+  jobs        ProcessingJob[]
+
+  viewCount     Int @default(0)
+  downloadCount Int @default(0)
+
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+model Page {
+  id         String @id @default(cuid())
+  flipbookId String
+  flipbook   Flipbook @relation(fields: [flipbookId], references: [id], onDelete: Cascade)
+
+  pageNumber Int // 1-indexed
+  width      Int
+  height     Int
+
+  thumbKey String // small raster for the TOC rail (~200px)
+  lowKey   String // fast-loading raster shown while flipping (~800px)
+  highKey  String // crisp raster shown at rest / when zoomed (~1800px)
+
+  textContent String? @db.Text // extracted text layer, used for in-book search
+
+  hotspots Hotspot[]
+
+  @@unique([flipbookId, pageNumber])
+  @@index([flipbookId])
+}
+
+enum HotspotType {
+  LINK
+  VIDEO
+  IMAGE
+  TEXT
+}
+
+// Clickable rich-media regions layered on top of a page, positioned in
+// fractional coordinates (0..1) so they scale with the rendered page size.
+model Hotspot {
+  id         String   @id @default(cuid())
+  flipbookId String
+  flipbook   Flipbook @relation(fields: [flipbookId], references: [id], onDelete: Cascade)
+  pageId     String
+  page       Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  type   HotspotType
+  x      Float // 0..1, left offset relative to page width
+  y      Float // 0..1, top offset relative to page height
+  width  Float // 0..1, relative width
+  height Float // 0..1, relative height
+
+  url     String? // LINK target, or VIDEO/IMAGE source URL
+  caption String?
+
+  createdAt DateTime @default(now())
+
+  @@index([flipbookId])
+  @@index([pageId])
+}
+
+model ViewEvent {
+  id         String   @id @default(cuid())
+  flipbookId String
+  flipbook   Flipbook @relation(fields: [flipbookId], references: [id], onDelete: Cascade)
+
+  sessionId       String // random id stored in viewer's cookie, not PII
+  referrer        String?
+  country         String?
+  deviceType      String? // mobile | tablet | desktop
+  maxPageReached  Int      @default(0)
+  durationSeconds Int      @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([flipbookId, sessionId])
+  @@index([flipbookId, createdAt])
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
+// DB-backed queue: the worker process polls for PENDING rows instead of
+// requiring a separate broker (Redis/etc.) — plenty for single-VPS scale.
+model ProcessingJob {
+  id         String   @id @default(cuid())
+  flipbookId String
+  flipbook   Flipbook @relation(fields: [flipbookId], references: [id], onDelete: Cascade)
+
+  status   JobStatus @default(PENDING)
+  attempts Int       @default(0)
+  error    String?   @db.Text
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  startedAt DateTime?
+  finishedAt DateTime?
+
+  @@index([status, createdAt])
+}

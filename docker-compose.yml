@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kappzine
+      POSTGRES_PASSWORD: kappzine
+      POSTGRES_DB: kappzine
+    ports:
+      - "5432:5432"
+    volumes:
+      - kappzine_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kappzine"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://kappzine:kappzine@postgres:5432/kappzine?schema=public
+    ports:
+      - "3000:3000"
+    volumes:
+      - kappzine_storage:/app/storage-data
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["npm", "run", "worker"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://kappzine:kappzine@postgres:5432/kappzine?schema=public
+    volumes:
+      - kappzine_storage:/app/storage-data
+
+volumes:
+  kappzine_postgres_data:
+  kappzine_storage:
