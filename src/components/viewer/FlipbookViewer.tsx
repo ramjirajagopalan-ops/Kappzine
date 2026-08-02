@@ -98,9 +98,7 @@ export function FlipbookViewer({
   const loadedHighRef = useRef<Set<number>>(new Set());
   const maxPageRef = useRef(0);
 
-  const [mode, setMode] = useState<"SINGLE" | "DOUBLE">(
-    flipbook.defaultViewMode === "SINGLE" ? "SINGLE" : "DOUBLE"
-  );
+  const [mode, setMode] = useState<"SINGLE" | "DOUBLE" | "AUTO">(flipbook.defaultViewMode);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [soundOn, setSoundOn] = useState(flipbook.flipSound);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -150,6 +148,7 @@ export function FlipbookViewer({
 
       return el;
     });
+    loadedHighRef.current = new Set();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pages]);
 
@@ -162,23 +161,28 @@ export function FlipbookViewer({
     loadedHighRef.current.add(pageIndex);
   }
 
-  function computePageSize() {
-    const wrapRect = stageWrapperRef.current!.getBoundingClientRect();
-    const availW = Math.max(240, wrapRect.width - 24);
-    const availH = Math.max(240, wrapRect.height - 24);
-    const factor = mode === "DOUBLE" ? 2 : 1;
-
-    let pageW = availW / factor;
-    let pageH = pageW / pageAspect;
-    if (pageH > availH) {
-      pageH = availH;
-      pageW = pageH * pageAspect;
-    }
-    pageW = Math.min(pageW, 620);
-    pageH = Math.min(pageH, 860);
-    return { pageW: Math.round(pageW), pageH: Math.round(pageH) };
-  }
-
+  // ---- StPageFlip sizing --------------------------------------------------
+  // Previous approach computed a fixed pixel size ourselves and destroyed +
+  // rebuilt the whole PageFlip instance on every window "resize" event. That
+  // fights the library's OWN internal resize listener (it registers one too,
+  // see StPageFlip's UI.ts), and PageFlip.destroy() never actually cancels
+  // its requestAnimationFrame render loop — only removes the DOM node. Two
+  // instances (or an old, destroyed-but-still-animating one) end up
+  // repositioning the *same* shared page elements at once, which is exactly
+  // the overlapping "ghost page" corruption seen on mobile, where the
+  // address bar showing/hiding fires resize events constantly.
+  //
+  // The fix: use StPageFlip's own "stretch" sizing mode, which reads the
+  // container's live size on every internal resize tick without us ever
+  // touching destroy/rebuild for a plain resize. We only rebuild when the
+  // user explicitly changes the single/double/auto mode (rare, deliberate),
+  // and per-mode behavior is expressed via minWidth/usePortrait rather than
+  // a manually recomputed pixel size:
+  //  - AUTO:   usePortrait true, normal breakpoint -> switches to a single
+  //            page once the container gets too narrow for a spread.
+  //  - SINGLE: usePortrait true, with an unreachably large minWidth so the
+  //            portrait (single-page) branch is always taken.
+  //  - DOUBLE: usePortrait false, so it never drops to single page.
   function buildFlip(startPage: number) {
     if (!bookHostRef.current || pageElsRef.current.length === 0) return;
 
@@ -188,27 +192,41 @@ export function FlipbookViewer({
       } catch {
         /* no-op */
       }
+      // Defensive: destroy() should already remove this node, but don't
+      // leave a stale copy in the live DOM if it threw partway through.
+      if (bookHostRef.current.parentNode) {
+        bookHostRef.current.parentNode.removeChild(bookHostRef.current);
+      }
       const fresh = document.createElement("div");
       fresh.id = "kzn-book";
       pageElsRef.current.forEach((el) => fresh.appendChild(el));
-      bookHostRef.current.replaceWith(fresh);
+      stageRef.current?.appendChild(fresh);
       bookHostRef.current = fresh;
     }
 
-    const { pageW, pageH } = computePageSize();
-    const totalW = pageW * (mode === "DOUBLE" ? 2 : 1);
-    stageRef.current!.style.width = `${totalW}px`;
-    stageRef.current!.style.height = `${pageH}px`;
-    bookHostRef.current.style.width = stageRef.current!.style.width;
-    bookHostRef.current.style.height = stageRef.current!.style.height;
+    // NOTE: minWidth doubles as a *literal* CSS min-width StPageFlip applies
+    // to the book element (scaled ×1 for portrait, ×2 for landscape) — not
+    // purely an internal threshold. Do not set this to an arbitrarily large
+    // "always true" value to force single-page mode: it becomes a real
+    // `min-width` in pixels on the DOM element, blowing it up far past the
+    // viewport and stealing clicks from everything underneath it. Keep it
+    // at a sane single/spread page width instead.
+    const minWidth = mode === "SINGLE" ? 340 : mode === "AUTO" ? 380 : 220;
+    const maxWidth = 560;
+    const minHeight = 240;
+    const maxHeight = 860;
 
     const pageFlip = new PageFlip(bookHostRef.current, {
-      width: pageW,
-      height: pageH,
-      size: "fixed",
-      autoSize: false,
+      width: Math.round(pageAspect * maxHeight),
+      height: maxHeight,
+      size: "stretch",
+      autoSize: true,
+      minWidth,
+      maxWidth,
+      minHeight,
+      maxHeight,
       showCover: flipbook.hardCovers,
-      usePortrait: mode === "SINGLE",
+      usePortrait: mode !== "DOUBLE",
       maxShadowOpacity: 0.6,
       flippingTime: 700,
       mobileScrollSupport: true,
@@ -234,23 +252,14 @@ export function FlipbookViewer({
     upgradeToHigh(startPage + 1);
   }
 
-  useEffect(() => {
-    buildFlip(currentIndex);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
-
+  // Rebuilds only on mount and on an explicit mode change — never on window
+  // resize/orientation/fullscreen, which "stretch" sizing already handles
+  // internally via StPageFlip's own resize listener.
   useEffect(() => {
     if (pageElsRef.current.length === 0) return;
-    buildFlip(0);
-    let resizeTimer: ReturnType<typeof setTimeout>;
-    const onResize = () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => buildFlip(pageFlipRef.current?.getCurrentPageIndex() ?? 0), 150);
-    };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    buildFlip(pageFlipRef.current?.getCurrentPageIndex() ?? 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pages]);
+  }, [mode, pages]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -268,11 +277,12 @@ export function FlipbookViewer({
   useEffect(() => {
     function onFsChange() {
       setIsFullscreen(Boolean(document.fullscreenElement));
-      setTimeout(() => buildFlip(pageFlipRef.current?.getCurrentPageIndex() ?? 0), 60);
+      // Safe, non-destructive: just asks StPageFlip to recompute its layout
+      // for the new viewport, unlike the old rebuild-on-fullscreen-change.
+      setTimeout(() => pageFlipRef.current?.update(), 60);
     }
     document.addEventListener("fullscreenchange", onFsChange);
     return () => document.removeEventListener("fullscreenchange", onFsChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -334,8 +344,8 @@ export function FlipbookViewer({
 
       <div className="relative flex-1 flex flex-col items-center justify-center px-4 py-4 min-h-0">
         <div ref={stageWrapperRef} className="flex flex-1 w-full items-center justify-center min-h-0">
-          <div ref={stageRef} className="relative">
-            <div ref={bookHostRef} id="kzn-book" className="relative" />
+          <div ref={stageRef} className="relative h-full w-full max-w-full flex items-center justify-center">
+            <div ref={bookHostRef} id="kzn-book" className="relative h-full" />
           </div>
         </div>
 
@@ -371,6 +381,9 @@ export function FlipbookViewer({
       </div>
 
       <div className="flex items-center justify-center gap-1.5 px-4 pb-4 pb-[env(safe-area-inset-bottom,0px)] flex-wrap">
+        <ToolbarButton active={mode === "AUTO"} onClick={() => setMode("AUTO")} label="Auto page layout" wide>
+          Auto
+        </ToolbarButton>
         <ToolbarButton active={mode === "SINGLE"} onClick={() => setMode("SINGLE")} label="Single page" small>
           1
         </ToolbarButton>
@@ -502,12 +515,14 @@ function ToolbarButton({
   active,
   label,
   small,
+  wide,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   active?: boolean;
   label: string;
   small?: boolean;
+  wide?: boolean;
 }) {
   return (
     <button
@@ -515,7 +530,7 @@ function ToolbarButton({
       aria-label={label}
       title={label}
       className={`flex items-center justify-center rounded-full border transition-colors ${
-        small ? "h-8 w-8 text-xs" : "h-9 w-9"
+        wide ? "h-8 px-3 text-xs" : small ? "h-8 w-8 text-xs" : "h-9 w-9"
       } ${active ? "border-accent text-accent bg-accent/10" : "border-white/15 text-white/70 hover:border-accent hover:text-accent"}`}
     >
       {children}

@@ -10,6 +10,7 @@ declare module "page-flip" {
     loadFromHTML(items: HTMLElement[] | NodeListOf<HTMLElement>): void;
     updateFromHtml(items: HTMLElement[] | NodeListOf<HTMLElement>): void;
     turnToPage(page: number): void;
+    update(): void;
     flip(page: number, corner?: string): void;
     flipNext(corner?: string): void;
     flipPrev(corner?: string): void;
