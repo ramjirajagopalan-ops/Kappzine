@@ -298,6 +298,18 @@ function pageImg(i) {
 let anchorPoint = { x: 0, y: 0 };
 let anchorDir = 1; // 1 = right edge (next), -1 = left edge (prev)
 
+// The point actually clicked, in canvas coordinates — distinct from
+// anchorPoint, which snaps to the exact page edge (x=0 or W) for the
+// fold's geometry. The EDGE_ZONE margin that allows starting a drag is
+// generous (~100px), so a perfectly ordinary click can land well inside
+// the true edge; measuring drag distance from anchorPoint (as an earlier
+// version did) turned that gap alone into phantom drag distance, giving
+// an unrequested curl the instant you clicked, before any real
+// movement. Measuring from where the pointer actually went down fixes
+// that: distance is genuinely 0 right after a click, no matter where in
+// the edge zone it landed.
+let dragStart = { x: 0, y: 0 };
+
 // A small, un-clicked "you can turn this page" hint — hovering near an
 // edge eases in a small corner curl, same as Heyzine does before you've
 // even pressed down, instead of giving no visual feedback until a drag
@@ -635,6 +647,7 @@ canvas.addEventListener('pointerdown', (e) => {
   // Anchor to wherever the reader actually grabbed the edge (this exact
   // y), not a corner — see the note above anchorPoint's declaration.
   anchorPoint = { x: dir === 1 ? W : 0, y };
+  dragStart = { x, y };
   anchorDir = dir;
   curN = { x: dir, y: 0 };
   dragging = true;
@@ -660,21 +673,34 @@ canvas.addEventListener('pointermove', (e) => {
     setHoverTarget(canGo ? legLen * Math.SQRT1_2 : 0, dir || hoverDir, corner);
     return;
   }
-  // n must point FROM the fold line TOWARD the anchor, i.e. from the
-  // pointer back to the anchor point — not anchor-to-pointer (that
-  // direction is backwards and sends the fold line's origin outside the
-  // page entirely, which looked like no fold rendering at all).
-  const vx = anchorPoint.x - x, vy = anchorPoint.y - y;
+  // Measure both the reach (d) and the lean direction from dragStart —
+  // the actual point the pointer went down at — not from anchorPoint,
+  // which snaps to the exact page edge. Using anchorPoint here (an
+  // earlier version did) meant the gap between the edge and wherever the
+  // click actually landed inside the generous edge-zone margin counted
+  // as phantom drag distance, producing a curl the instant you clicked,
+  // before any real movement — measuring from dragStart makes that gap
+  // exactly zero at the moment of the click, growing only with genuine
+  // subsequent movement, still 1:1.
+  const vx = dragStart.x - x, vy = dragStart.y - y;
   const len = Math.hypot(vx, vy);
-  d = Math.max(0, Math.min(maxD(), len));
+  // A small dead zone on top of the dragStart fix above, purely to
+  // absorb genuine hand tremor on the press itself (a few px) so the
+  // very first rendered frame of a real drag reads as perfectly flat,
+  // not just "very nearly" flat.
+  const JITTER_DEAD_ZONE = 6;
+  d = Math.max(0, Math.min(maxD(), len - JITTER_DEAD_ZONE));
   // The fold direction tracks the pointer live and can lean with the
-  // vertical drag, same as a real page — but a real page is bound to its
-  // spine: it can lean, but it can never rotate past the spine or fold
-  // back on itself, or the paper would tear. Clamp the lean angle (measured
-  // from the straight pull-to-spine direction) to a hard maximum instead of
-  // letting the raw pointer vector point any which way.
+  // vertical drag, like a real page does — but Heyzine's own fold stays
+  // close to a natural, straight-across turn even when you drag quite
+  // erratically vertically; it doesn't swing to match the raw drag
+  // vector's angle the way an earlier, much larger clamp here did (75°
+  // let a mostly-vertical drag produce a steep near-diagonal slice that
+  // read as "wrong direction" rather than a page turning on its spine).
+  // A much tighter clamp keeps the lean as a subtle flourish instead of
+  // letting vertical mouse movement redirect the turn itself.
   if (len > 1) {
-    const MAX_LEAN = 75 * Math.PI / 180;
+    const MAX_LEAN = 28 * Math.PI / 180;
     let ang = Math.atan2(vy, vx * anchorDir);
     ang = Math.max(-MAX_LEAN, Math.min(MAX_LEAN, ang));
     curN = { x: anchorDir * Math.cos(ang), y: Math.sin(ang) };
@@ -684,12 +710,18 @@ canvas.addEventListener('pointermove', (e) => {
 canvas.addEventListener('pointerup', () => {
   if (!dragging) return;
   dragging = false;
-  // Commit once roughly half the page is visibly folded over — matching
-  // Heyzine's feel — rather than comparing raw drag distance to the
-  // page's full diagonal, which (even after the reach fix above) doesn't
-  // track how much of the page LOOKS turned for anything but a dead
-  // straight, corner-to-corner drag.
-  if (lastReach > W * 0.5) animateD(fullCloseD(anchorPoint, curN), 440, anchorDir, true);
+  // Commit once the drag is more than halfway to THIS anchor/lean's own
+  // full-closure distance. `lastReach` (the flap's paint bounds) looks
+  // like the natural thing to compare here, but it isn't reliable for
+  // this: it's the extent of a polygon whose corners can land far from
+  // the crease for a steep lean near a page corner, so it can vastly
+  // overshoot the actual drag distance (a real jitter of a few pixels
+  // was measured at "lastReach" of 250+, wrongly committing to a full
+  // page turn from what was barely a twitch). Comparing `d` itself
+  // against fullCloseD's own scale doesn't have that problem — both
+  // sides of the comparison come from the same anchor/lean, so a tiny
+  // drag reads as tiny regardless of how the polygon happens to project.
+  if (d > fullCloseD(anchorPoint, curN) * 0.5) animateD(fullCloseD(anchorPoint, curN), 440, anchorDir, true);
   else animateD(0, 320, anchorDir, false);
 });
 canvas.addEventListener('pointerleave', () => {

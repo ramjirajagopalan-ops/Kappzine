@@ -129,6 +129,41 @@ Artifact link shared in chat).
     hover ease rate, per direct user feedback that the motion felt too
     fast/abrupt even after the dead-tail fix.
 
+- Clicking no longer produces an unrequested curl, and dragging mostly
+  vertically no longer swings the fold to a steep, "wrong direction"
+  diagonal (fixed 2026-08-03, fourth pass, from two screen recordings).
+  Two distinct root causes:
+  - The phantom click-curl: `anchorPoint` (the fold's geometric anchor)
+    snaps to the exact page edge, but the edge-zone margin that allows
+    starting a drag is generous (~100px), so an ordinary click can land
+    well inside the true edge. Measuring drag distance from anchorPoint
+    (as every earlier version did) turned that click-to-edge gap alone
+    into phantom drag distance — a real curl appearing the instant you
+    clicked, before any actual movement. Fixed by adding `dragStart`
+    (the point the pointer actually went down at, distinct from
+    anchorPoint) and measuring both reach and lean direction from that
+    instead — genuinely zero at the moment of a click, growing only with
+    real subsequent movement. A small 6px dead zone on top absorbs
+    ordinary hand tremor on the press itself.
+  - Direction fidelity: MAX_LEAN was 75°, so a mostly-vertical drag
+    produced a steep near-diagonal slice that read as "wrong direction"
+    rather than a page turning on its spine, where Heyzine's own fold
+    stays close to a natural, straight-across turn even when dragged
+    erratically. Tightened to 28° so the lean reads as a flourish, not a
+    redirect of the turn itself.
+  - Fixing the click-curl surfaced a related bug in the release/commit
+    decision: `lastReach` (the flap's paint-bounds extent) can vastly
+    overshoot the actual drag distance for a steep lean anchored near a
+    page corner — the same "polygon corner far from the crease" quirk
+    fixed earlier for the animation target, just showing up in a new
+    spot. A genuine ~7px jitter was measured at a "lastReach" of 250+,
+    which very nearly (wrongly) auto-completed a full page turn from a
+    twitch. Fixed by comparing `d` itself against `fullCloseD(anchor, n)
+    * 0.5` for the commit decision instead of comparing `lastReach`
+    against a fixed page-width fraction — both sides of that comparison
+    scale from the same anchor/lean, so it can't be thrown off the same
+    way.
+
 ## Still open
 Nothing outstanding — engine confirmed matching Heyzine's behavior and
 feel as of 2026-08-03. Next step (deferred, needs explicit go-ahead): port
