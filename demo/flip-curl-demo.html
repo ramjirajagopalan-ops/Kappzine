@@ -443,14 +443,21 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
     ctx.clip();
   }
 
-  // Heyzine's own paper has no gradient at all on it — flat, even white.
-  // All the roundness/depth reads from the cast shadow alone (drawn
-  // above, shaped exactly like this same polygon). A gradient here was
-  // also what produced a stray bright wedge near the tip vertex, where a
-  // linear gradient's late colour stops pool oddly close to a sharp
-  // point. Plain white sidesteps both problems at once.
-  ctx.fillStyle = '#ffffff';
+  // Flat white alone read as too flat — Heyzine's paper is still mostly
+  // white but has a soft mid-tone shading that makes it read as a curved,
+  // slightly bulging sheet rather than a flat cut-out triangle. Bring
+  // back a gradient, but stay close to white throughout (no cream/tan
+  // tones) and keep the darkest point comfortably before the tip, with a
+  // long fade back to white — the earlier artifact came from a stop
+  // sitting close to the tip's sharp point, not from having a gradient
+  // at all.
   const reach = -Math.min(...flapLocal.map(p => p.x), -half);
+  const paper = ctx.createLinearGradient(0, 0, -reach, 0);
+  paper.addColorStop(0, '#ffffff');
+  paper.addColorStop(0.4, '#f3f3f1');
+  paper.addColorStop(0.68, '#dddbd6');
+  paper.addColorStop(1, '#ffffff');
+  ctx.fillStyle = paper;
   fillBandLocal(0, -reach);
 
   ctx.restore();

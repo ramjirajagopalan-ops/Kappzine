@@ -53,13 +53,15 @@ Artifact link shared in chat).
   whether the right page is showing through.
 - White background.
 
-- Curl paper is flat solid white (`#ffffff`), no internal gradient (fixed
-  2026-08-03 — confirmed against Heyzine that its paper has no gradient at
-  all; our multi-stop gradient was also the cause of a stray bright wedge
-  artifact near the tip vertex, gone now that there's no gradient to pool
-  oddly there). All the roundness/depth now comes from the cast shadow
-  alone. User confirmed the shadow + geometry are ~99% matching Heyzine at
-  this point.
+- Curl paper is mostly white with a soft, subtle mid-tone gradient (white
+  at the crease → very light grey mid-curve → white again near the tip),
+  giving it a gently bulged/curved look like Heyzine's, without the cream
+  tint or the tip-vertex artifact the first gradient attempt had (fixed
+  2026-08-03 — flat solid white alone, tried first, read as too flat
+  compared to Heyzine's subtly rounded paper; the fix keeps every stop
+  close to white and keeps the darkest stop well before the tip's sharp
+  point, with a long fade back to white, instead of a stop sitting close
+  to that point the way the original attempt did).
 
 ## Still open
 - One more geometric issue flagged by the user, not yet described in
