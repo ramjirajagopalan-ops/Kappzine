@@ -682,23 +682,29 @@ canvas.addEventListener('pointermove', (e) => {
   // before any real movement — measuring from dragStart makes that gap
   // exactly zero at the moment of the click, growing only with genuine
   // subsequent movement, still 1:1.
-  // The fold stays straight (n always horizontal, full page height) and
-  // its reach is driven only by the HORIZONTAL distance dragged —
-  // however you drag, the page turns the same way a real sheet held at
-  // its edge would, rather than tilting (or even just reaching further)
-  // because the pointer wandered vertically. Several rounds of leaning
-  // this by the drag angle (first a fixed clamp, then a clamp that
-  // itself narrowed as the drag progressed) still read as "the wrong
-  // direction"; removing the lean entirely, and keying reach off vx
-  // alone, is the direct fix.
-  const vx = (dragStart.x - x) * anchorDir;
+  const vx = dragStart.x - x, vy = dragStart.y - y;
+  const len = Math.hypot(vx, vy);
   // A small dead zone on top of the dragStart fix above, purely to
   // absorb genuine hand tremor on the press itself (a few px) so the
   // very first rendered frame of a real drag reads as perfectly flat,
   // not just "very nearly" flat.
   const JITTER_DEAD_ZONE = 6;
-  d = Math.max(0, Math.min(maxD(), vx - JITTER_DEAD_ZONE));
-  curN = { x: anchorDir, y: 0 };
+  d = Math.max(0, Math.min(maxD(), len - JITTER_DEAD_ZONE));
+  // Removing the lean entirely (an intervening version did this) was a
+  // step too far — it lost the natural corner-peel curl a real page
+  // shows for a small drag, turning every click into the same flat
+  // straight cut regardless of where on the edge you grabbed. Restored
+  // the lean, narrowing from a steep peel near the corner (grabbed
+  // point) down toward vertical as the drag progresses toward closing —
+  // matches Heyzine's own reference (measured ~45° for a small peel,
+  // ~15-20° by the time a drag is close to complete).
+  if (len > 1) {
+    const progress = Math.min(1, d / (W * 0.5));
+    const MAX_LEAN = (55 - 38 * progress) * Math.PI / 180;
+    let ang = Math.atan2(vy, vx * anchorDir);
+    ang = Math.max(-MAX_LEAN, Math.min(MAX_LEAN, ang));
+    curN = { x: anchorDir * Math.cos(ang), y: Math.sin(ang) };
+  }
   render();
 });
 canvas.addEventListener('pointerup', () => {

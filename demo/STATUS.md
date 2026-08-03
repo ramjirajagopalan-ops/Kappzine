@@ -207,10 +207,33 @@ Artifact link shared in chat).
   the same horizontal distance now all produce pixel-identical reach;
   vertical-only movement (zero horizontal) produces no curl at all.
 
+- **Reverted "remove lean entirely" (2026-08-03, seventh pass).** The
+  sixth-pass change above was wrong and explicitly rejected: *"no it just
+  collapsed our earlier works. now even if u click its just straight. see
+  the video. just go back to our earlier output better. we need to see
+  the page curl right. now wherever u click its just straight. totally
+  wrong."* Confirmed via extracted frames from the rejection video that
+  a click near the bottom edge produced a full-height straight vertical
+  cut with no natural corner-peel curl, regardless of where on the edge
+  you grabbed — a genuine regression from the lean-decay behavior, not a
+  matter of taste. Reverted `pointermove` back to the exact lean-decay
+  model from the fourth pass: drag distance/direction measured via
+  `hypot(vx, vy)` from `dragStart` (not just the horizontal component),
+  with `MAX_LEAN = (55 - 38 * progress)°` where `progress = d / (W *
+  0.5)`, giving a steep ~45° lean for a small corner peel narrowing to
+  ~17° as the drag approaches completion. Verified via debug
+  instrumentation that a constant 45°-angle drag input now reproduces the
+  identical angle progression measured before the regression (45.0° →
+  42.8° → 36.2° → 29.6° → 22.9° → 17.0° → 17.0° across increasing drag
+  distances), and re-ran the full standing regression suite (phantom
+  click-curl, full-height fold, edge-zone no-op, next-page reveal,
+  cursor, hover hint, animation smoothness, jitter no-false-commit, 40%
+  commit threshold) — all passed.
+
 ## Still open
 Nothing outstanding — engine confirmed matching Heyzine's behavior and
-feel as of 2026-08-03. Next step (deferred, needs explicit go-ahead): port
-this into `FlipbookViewer.tsx`, replacing StPageFlip.
+feel as of 2026-08-03 (post-revert). Next step (deferred, needs explicit
+go-ahead): port this into `FlipbookViewer.tsx`, replacing StPageFlip.
 - Double-page spread mode (cover → 2-page spread like a real open magazine,
   e.g. page 1 back = page 2, shown side-by-side with page 3) — requested by
   the user, more detail incoming before starting this.
