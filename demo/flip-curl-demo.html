@@ -353,15 +353,21 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
     return;
   }
 
-  // A real mirror fold reflects the grabbed corner (anchor) exactly onto
-  // wherever it's been dragged to (a point `dd` away from anchor, along
-  // -n). The crease itself sits at the MIDPOINT of that reflection, not
-  // at the drag point — folding paper of length `half` back over an equal
-  // `half` of still-flat page beneath it. Using the full `dd` here (as an
-  // earlier version did) made the flap twice as long as it should be for
-  // any given drag, so it swallowed the whole page well before the drag
-  // was anywhere near complete.
-  const half = dd / 2;
+  // The crease sits `dd` away from the anchor, along -n — i.e. the flap
+  // reaches exactly as far as the pointer has actually travelled. An
+  // earlier version placed the crease at the MIDPOINT between the anchor
+  // and the pointer (the literal mirror-fold reflection point), which is
+  // the textbook-correct paper fold... but it meant dragging a full
+  // page-width only ever moved the visible fold to the halfway point, and
+  // reaching the spine required dragging TWICE the page width — more than
+  // our own max-drag clamp allowed, so the fold could never fully close
+  // through dragging alone (only via the post-release snap animation).
+  // Tying reach directly to `dd` matches Heyzine's feel: drag one
+  // page-width, the fold closes essentially all the way. The taper clip
+  // below still bounds the visible flap to the real page rectangle, so
+  // this can't reintroduce the earlier "swallows the whole page" bug —
+  // it's now geometrically impossible to exceed the actual page bounds.
+  const half = dd;
   const F = { x: anchor.x - half * n.x, y: anchor.y - half * n.y };
   const angle = Math.atan2(n.y, n.x);
   const perp = { x: -n.y, y: n.x };

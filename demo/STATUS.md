@@ -62,9 +62,23 @@ Artifact link shared in chat).
   (crease to tip), which is why it never quite matched — Heyzine's flap is
   flat white except right at the bend.
 
+- Drag reach is now 1:1 with pointer travel, not 1:2 (fixed 2026-08-03,
+  from a screen recording showing the fold "won't curl more than half"
+  compared to Heyzine). Root cause: the crease sat at the MIDPOINT between
+  the anchor and the pointer (the textbook-correct flat mirror-fold
+  reflection point), so dragging a full page-width only ever moved the
+  visible fold to the halfway point, and reaching the spine required
+  dragging TWICE the page width — more than the code's own max-drag clamp
+  allowed, making full closure through dragging alone mathematically
+  impossible. The crease now sits directly at the pointer's distance from
+  the anchor; the taper clip (already in place) still bounds the flap to
+  the real page rectangle, so this doesn't reintroduce the earlier
+  "swallows the whole page" bug.
+
 ## Still open
-- One more geometric issue flagged by the user, not yet described in
-  detail — waiting on their next message before touching geometry again.
+Nothing outstanding — engine confirmed matching Heyzine's behavior and
+feel as of 2026-08-03. Next step (deferred, needs explicit go-ahead): port
+this into `FlipbookViewer.tsx`, replacing StPageFlip.
 - Double-page spread mode (cover → 2-page spread like a real open magazine,
   e.g. page 1 back = page 2, shown side-by-side with page 3) — requested by
   the user, more detail incoming before starting this.
