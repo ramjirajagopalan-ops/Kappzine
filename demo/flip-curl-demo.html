@@ -53,8 +53,9 @@
     A from-scratch canvas page turn (not a library) — grab anywhere on the page and drag; the
     fold always spans the full height, and its lean follows wherever you drag, just like turning
     a real page. Wide viewports open into a two-page spread automatically (or force it with the
-    1 / 2 / A buttons below) — spreads turn on a straight spine hinge instead of leaning. Or use
-    the arrows. Built and tuned against real reference recordings.
+    1 / 2 / A buttons below) — each page keeps the same size it had as the cover, and turns with
+    the same leaning corner-peel. Or use the arrows. Built and tuned against real reference
+    recordings.
   </p>
 
   <main id="mainArea">
@@ -462,8 +463,8 @@ let lastReach = 0;
 // climbing with dd past that point even though nothing more is visible,
 // which is exactly what produced a completion animation with a long
 // dead tail after an apparent instant snap).
-function fullCloseD(anchor, n) {
-  const corners = [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: H }, { x: 0, y: H }];
+function fullCloseDRect(anchor, n, x0, y0, x1, y1) {
+  const corners = [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
   let need = 1;
   for (const c of corners) {
     const v = (anchor.x - c.x) * n.x + (anchor.y - c.y) * n.y;
@@ -471,6 +472,7 @@ function fullCloseD(anchor, n) {
   }
   return need;
 }
+function fullCloseD(anchor, n) { return fullCloseDRect(anchor, n, 0, 0, W, H); }
 
 // Renders a full-height page fold as a flat mirror-fold — the reflected
 // edge lands exactly at the drag point, direction tracks the pointer
@@ -478,15 +480,32 @@ function fullCloseD(anchor, n) {
 // rounded, "premium" impression comes entirely from shading: a soft
 // highlight right at the crease, darkening toward the tip, and a cast
 // shadow — not from bending the geometry itself.
-function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
+// `rectOpts` generalizes this beyond a single full-canvas page: `x0,y0,
+// x1,y1` is the page rectangle the taper/lean is computed against (a
+// spread's flipping page is only HALF the canvas, not the whole thing),
+// `imgOffX,imgOffY` is where `frontImg` actually sits (it's a halfW x H
+// bitmap for a spread page, not a WxH one), `flapTexture` — if given —
+// is drawn as the flap's own face (a spread's leaf shows the real,
+// different page that's about to appear, unlike single-page mode's
+// blank paper-back), and `skipBase` skips the base `drawImage(nextImg)`
+// call for callers (spread mode) that already composited their own base
+// layer before calling in here. All four default to exactly
+// reproducing the original single-full-page behavior.
+function renderCornerCurl(frontImg, nextImg, dd, anchor, n, rectOpts) {
+  const x0 = rectOpts?.x0 ?? 0, y0 = rectOpts?.y0 ?? 0;
+  const x1 = rectOpts?.x1 ?? W, y1 = rectOpts?.y1 ?? H;
+  const imgOffX = rectOpts?.imgOffX ?? 0, imgOffY = rectOpts?.imgOffY ?? 0;
+  const flapTexture = rectOpts?.flapTexture ?? null;
+  const skipBase = rectOpts?.skipBase ?? false;
+
   // The next page is the base layer for the WHOLE canvas — it must be
   // visible the instant the flap starts lifting, not just once the flap
   // reaches the far edge. The previous version only ever drew the front
   // page and painted the folded band a flat paper colour on top, so
   // there was nothing else to reveal until the animation finished.
-  ctx.drawImage(nextImg, 0, 0);
+  if (!skipBase) ctx.drawImage(nextImg, 0, 0);
   if (dd <= 0.5) {
-    ctx.drawImage(frontImg, 0, 0);
+    ctx.drawImage(frontImg, imgOffX, imgOffY);
     return;
   }
 
@@ -527,7 +546,7 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
   ctx.lineTo(F.x - perp.x * BIG, F.y - perp.y * BIG);
   ctx.closePath();
   ctx.clip();
-  ctx.drawImage(frontImg, 0, 0);
+  ctx.drawImage(frontImg, imgOffX, imgOffY);
   ctx.restore();
 
   // The folded flap itself (paper-back + shading), worked out in the
@@ -553,7 +572,7 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
     const dx = px - F.x, dy = py - F.y;
     return { x: dx * n.x + dy * n.y, y: dx * perp.x + dy * perp.y };
   };
-  const cornersLocal = [toLocal(0, 0), toLocal(W, 0), toLocal(W, H), toLocal(0, H)];
+  const cornersLocal = [toLocal(x0, y0), toLocal(x1, y0), toLocal(x1, y1), toLocal(x0, y1)];
   const flapLocal = clipHalfPlaneLX(cornersLocal).map(p => ({ x: -p.x, y: p.y }));
 
   function tracePolygon() {
@@ -600,16 +619,36 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
   // corner-to-corner drag, which is why the release threshold used to
   // require dragging much further than "about half the page" to commit.
   lastReach = reach;
-  ctx.fillStyle = '#ffffff';
-  fillBandLocal(0, -reach);
 
-  const bandW = Math.min(46, reach * 0.5);
-  const roll = ctx.createLinearGradient(0, 0, -bandW, 0);
-  roll.addColorStop(0, '#ffffff');
-  roll.addColorStop(0.5, '#dcdad3');
-  roll.addColorStop(1, '#ffffff');
-  ctx.fillStyle = roll;
-  fillBandLocal(0, -bandW);
+  if (flapTexture) {
+    // A spread's leaf shows the ACTUAL upcoming page on its back, not
+    // blank paper — squeeze the whole texture into the flap's local
+    // bounding box; the polygon clip already applied above trims it to
+    // the true tapered shape, same trick fillBandLocal uses for the
+    // plain-white case below.
+    const xs = flapLocal.map(p => p.x), ys = flapLocal.map(p => p.y);
+    const bx0 = Math.min(...xs), bx1 = Math.max(...xs);
+    const by0 = Math.min(...ys), by1 = Math.max(...ys);
+    if (bx1 > bx0 && by1 > by0) ctx.drawImage(flapTexture, bx0, by0, bx1 - bx0, by1 - by0);
+
+    const bandW = Math.min(46, reach * 0.5);
+    const roll = ctx.createLinearGradient(0, 0, -bandW, 0);
+    roll.addColorStop(0, 'rgba(255,255,255,0.6)');
+    roll.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = roll;
+    fillBandLocal(0, -bandW);
+  } else {
+    ctx.fillStyle = '#ffffff';
+    fillBandLocal(0, -reach);
+
+    const bandW = Math.min(46, reach * 0.5);
+    const roll = ctx.createLinearGradient(0, 0, -bandW, 0);
+    roll.addColorStop(0, '#ffffff');
+    roll.addColorStop(0.5, '#dcdad3');
+    roll.addColorStop(1, '#ffffff');
+    ctx.fillStyle = roll;
+    fillBandLocal(0, -bandW);
+  }
 
   ctx.restore();
   ctx.restore();
@@ -622,14 +661,20 @@ function render() {
 
 // ---------------- Two-page spread mode ----------------
 // Interior pages (never the covers) can show as an open-book spread: the
-// static page stays exactly where it is the whole time, the page next to
-// it lifts and folds flat over to reveal the page underneath, and the
-// fold itself never leans (no corner-peel taper) — a spine-hinged leaf
-// turning "straight across" is what Heyzine's own reference recording
-// shows for its double-page view, unlike the corner-grab lean tuned for
-// single-page mode above. Reusing that lean here read as visually wrong
-// once the fold is anchored at a spine instead of a freely-grabbed
-// corner.
+// static page stays exactly where it is the whole time, and the page
+// next to it lifts and folds over to reveal the page underneath. An
+// earlier version gave this a straight, non-leaning vertical fold on the
+// theory that a spine-hinged leaf wouldn't lean the way a freely-grabbed
+// corner does — but a closer side-by-side recording against Heyzine
+// showed that's wrong: its spread flip leans and tapers exactly like its
+// single-page corner-peel, just applied to whichever half is lifting.
+// So this reuses the SAME leaning renderCornerCurl geometry as single
+// mode (via its rectOpts), just scoped to the flipping page's own half
+// of the canvas — the only real difference from single-page mode is that
+// the flap shows the real upcoming page's artwork instead of blank paper
+// (via renderCornerCurl's flapTexture option), because a spread's leaf
+// has a genuinely different page printed on its back, unlike a single
+// page's own blank reverse.
 function drawSpineShadow() {
   const w = Math.min(28, halfW * 0.12);
   const grad = ctx.createLinearGradient(halfW - w, 0, halfW + w, 0);
@@ -640,106 +685,60 @@ function drawSpineShadow() {
   ctx.fillRect(halfW - w, 0, w * 2, H);
 }
 
-// Draws the currently-lifting leaf as a plain rectangle (no rotation
-// needed — the fold is always vertical in spread mode) spanning
-// [x0,x1], showing `img` squeezed to that width. The image un-squeezes
-// to its natural width by the time the fold finishes (x1-x0 grows to
-// exactly halfW), which is what gives the "unrolling" look without any
-// actual 3D transform.
-function drawFlapRect(x0, x1, img, creaseAtX1) {
-  x0 = Math.max(0, x0); x1 = Math.min(W, x1);
-  const w = x1 - x0;
-  if (w <= 0.5) return;
-
-  // Shadow first, before any clipping to the flap's own rect — clipping
-  // first would cut the blur off exactly at the flap's edge instead of
-  // letting it spill onto the page underneath, the same "shadow reads as
-  // disconnected from the curl" bug the single-page engine hit earlier.
-  ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.4)';
-  ctx.shadowBlur = 18;
-  ctx.fillStyle = '#000';
-  ctx.fillRect(x0, 0, w, H);
-  ctx.restore();
-
-  ctx.save();
-  ctx.beginPath(); ctx.rect(x0, 0, w, H); ctx.clip();
-  ctx.drawImage(img, x0, 0, w, H);
-
-  // A soft highlight right at the crease (paper catching the light as it
-  // lifts), fading away from it — same idea as the single-page engine's
-  // "roll" band.
-  const bandW = Math.min(46, w * 0.6);
-  const roll = creaseAtX1
-    ? ctx.createLinearGradient(x1, 0, x1 - bandW, 0)
-    : ctx.createLinearGradient(x0, 0, x0 + bandW, 0);
-  roll.addColorStop(0, 'rgba(255,255,255,0.65)');
-  roll.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = roll;
-  if (creaseAtX1) ctx.fillRect(x1 - bandW, 0, bandW, H);
-  else ctx.fillRect(x0, 0, bandW, H);
-  ctx.restore();
-}
-
-// `dd` is the drag distance (0..halfW — a spread's fold fully closes
-// after traveling only one page's own width, not the whole spread's).
-// `dir` is 1 for a forward (right page lifting) flip, -1 for backward
-// (left page lifting).
-function renderSpreadCurl(dd, dir) {
-  const hw = halfW;
-  if (dir === 1) {
-    const staticImg = pageImg(currentIndex);       // left page: untouched
-    const foldingImg = pageImg(currentIndex + 1);  // old right: lifting
-    const flapImg = pageImg(currentIndex + 2);     // becomes the new left
-    const revealIdx = currentIndex + 3;            // becomes the new right
-
-    ctx.drawImage(staticImg, 0, 0, hw, H);
-    if (revealIdx <= PAGES.length - 1) ctx.drawImage(pageImg(revealIdx), hw, 0, hw, H);
-
-    if (dd <= 0.5) { ctx.drawImage(foldingImg, hw, 0, hw, H); drawSpineShadow(); return; }
-
-    const Fx = W - dd;
-    const flapX0 = Math.max(0, W - 2 * dd);
-
-    ctx.save();
-    ctx.beginPath(); ctx.rect(hw, 0, Math.max(0, Fx - hw), H); ctx.clip();
-    ctx.drawImage(foldingImg, hw, 0, hw, H);
-    ctx.restore();
-
-    drawFlapRect(flapX0, Fx, flapImg, true);
-  } else {
-    const staticImg = pageImg(currentIndex + 1);   // right page: untouched
-    const foldingImg = pageImg(currentIndex);      // old left: lifting
-    const flapImg = pageImg(currentIndex - 1);     // becomes the new right
-    const revealIdx = currentIndex - 2;            // becomes the new left
-
-    ctx.drawImage(staticImg, hw, 0, hw, H);
-    if (revealIdx >= 0) ctx.drawImage(pageImg(revealIdx), 0, 0, hw, H);
-
-    if (dd <= 0.5) { ctx.drawImage(foldingImg, 0, 0, hw, H); drawSpineShadow(); return; }
-
-    const Fx = dd;
-    const flapX1 = Math.min(W, 2 * dd);
-
-    ctx.save();
-    ctx.beginPath(); ctx.rect(Fx, 0, Math.max(0, hw - Fx), H); ctx.clip();
-    ctx.drawImage(foldingImg, 0, 0, hw, H);
-    ctx.restore();
-
-    drawFlapRect(Fx, flapX1, flapImg, false);
-  }
-  drawSpineShadow();
+// The page rect (half the canvas) and image-placement offset for
+// whichever side is currently lifting, keyed by drag direction — shared
+// by pointermove/pointerup (to compute lean/closure distance) and
+// renderSpread (to actually draw it), so the two can't disagree about
+// which half is in play.
+function spreadFoldRect(dir) {
+  return dir === 1
+    ? { x0: halfW, y0: 0, x1: W, y1: H, imgOffX: halfW }
+    : { x0: 0, y0: 0, x1: halfW, y1: H, imgOffX: 0 };
 }
 
 function renderSpread() {
   ctx.clearRect(0, 0, W, H);
-  if (d > 0.5) {
-    renderSpreadCurl(d, anchorDir);
-  } else {
+
+  if (d <= 0.5) {
     ctx.drawImage(pageImg(currentIndex), 0, 0, halfW, H);
     ctx.drawImage(pageImg(currentIndex + 1), halfW, 0, halfW, H);
     drawSpineShadow();
+    updateIndicator();
+    return;
   }
+
+  const dir = anchorDir;
+  const rect = spreadFoldRect(dir);
+  let foldingImg, flapIdx, staticImg, staticX, revealIdx, revealX;
+  if (dir === 1) {
+    foldingImg = pageImg(currentIndex + 1);  // old right: lifting
+    flapIdx = currentIndex + 2;              // becomes the new left
+    staticImg = pageImg(currentIndex); staticX = 0;
+    revealIdx = currentIndex + 3;            // becomes the new right
+    revealX = halfW;
+  } else {
+    foldingImg = pageImg(currentIndex);      // old left: lifting
+    flapIdx = currentIndex - 1;              // becomes the new right
+    staticImg = pageImg(currentIndex + 1); staticX = halfW;
+    revealIdx = currentIndex - 2;            // becomes the new left
+    revealX = 0;
+  }
+
+  ctx.drawImage(staticImg, staticX, 0, halfW, H);
+  if (revealIdx >= 0 && revealIdx <= PAGES.length - 1) ctx.drawImage(pageImg(revealIdx), revealX, 0, halfW, H);
+
+  const closeD = fullCloseDRect(anchorPoint, curN, rect.x0, rect.y0, rect.x1, rect.y1);
+  if (d >= closeD - 1) {
+    ctx.drawImage(pageImg(flapIdx), rect.imgOffX, 0, halfW, H);
+  } else {
+    renderCornerCurl(foldingImg, null, d, anchorPoint, curN, {
+      x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1,
+      imgOffX: rect.imgOffX, imgOffY: 0,
+      flapTexture: pageImg(flapIdx),
+      skipBase: true,
+    });
+  }
+  drawSpineShadow();
   updateIndicator();
 }
 
@@ -837,11 +836,20 @@ function resize() {
   spreadActive = computeSpreadActive(rect.width);
 
   if (spreadActive) {
-    // Same per-page aspect ratio as single mode, just fit twice
-    // side-by-side — leaves room for the corner-nav arrows either side.
-    let w = (rect.width - 100) / 2, h = rect.height;
-    if (w / h > aspect) w = h * aspect; else h = w / aspect;
-    w = Math.min(w, 460); h = Math.min(h, 660);
+    // Start from the SAME natural per-page target single mode would use
+    // for this viewport (height-driven, capped at 460x660) — a spread
+    // must only get smaller than that if the viewport genuinely can't
+    // fit two pages side by side, never as a blanket "half the space per
+    // page" rule. Halving the layout budget up front (an earlier version
+    // did exactly that) made every spread page visibly smaller than the
+    // single cover at the same viewport, which is backwards from how an
+    // open book actually reads — Heyzine's own reference keeps each
+    // page's size the same when it opens into a spread.
+    let h = rect.height, w = h * aspect;
+    if (w > 460) { w = 460; h = w / aspect; }
+    if (h > 660) { h = 660; w = h * aspect; }
+    const avail = (rect.width - 100) / 2;
+    if (w > avail) { w = avail; h = w / aspect; }
     halfW = Math.round(w); H = Math.round(h);
     W = halfW * 2;
   } else {
@@ -905,16 +913,24 @@ canvas.addEventListener('pointermove', (e) => {
     return;
   }
   if (spreadActive) {
-    // No lean in spread mode — the fold is hinged at the spine, not
-    // freely grabbed at a corner, so it only ever travels straight
-    // across (see the note above renderSpreadCurl). Reach is simply the
-    // horizontal distance dragged, clamped to one page's own width
-    // (halfW) — that's exactly how far this fold can travel before it's
-    // lying completely flat on the opposite page.
-    const raw = (dragStart.x - x) * anchorDir;
+    // Same leaning corner-peel as single-page mode — a side-by-side
+    // recording against Heyzine's own spread flip showed it leans and
+    // tapers just like the single-page one, not a straight spine hinge
+    // (an earlier version assumed the latter and was wrong). The only
+    // difference from single mode is scale: "the page" here is only
+    // halfW wide, not the whole canvas, so the drag-distance clamp and
+    // the lean's own progress-toward-closing both use halfW instead of W.
+    const vx = dragStart.x - x, vy = dragStart.y - y;
+    const len = Math.hypot(vx, vy);
     const JITTER_DEAD_ZONE = 6;
-    d = Math.max(0, Math.min(halfW, raw - JITTER_DEAD_ZONE));
-    curN = { x: anchorDir, y: 0 };
+    d = Math.max(0, Math.min(Math.max(halfW, H) * 1.15, len - JITTER_DEAD_ZONE));
+    if (len > 1) {
+      const progress = Math.min(1, d / (halfW * 0.5));
+      const MAX_LEAN = (55 - 38 * progress) * Math.PI / 180;
+      let ang = Math.atan2(vy, vx * anchorDir);
+      ang = Math.max(-MAX_LEAN, Math.min(MAX_LEAN, ang));
+      curN = { x: anchorDir * Math.cos(ang), y: Math.sin(ang) };
+    }
     render();
     return;
   }
@@ -957,9 +973,16 @@ canvas.addEventListener('pointerup', () => {
   dragging = false;
   if (spreadActive) {
     // Same 40%-of-the-page-width commit rule as single mode, just scaled
-    // to one page's own width (halfW) instead of the whole spread's.
-    if (d > halfW * 0.4) animateD(halfW, 440, dragJump, true);
-    else animateD(0, 320, dragJump, false);
+    // to one page's own width (halfW) instead of the whole spread's, and
+    // the animation target is this lean's own closure distance for the
+    // half that's actually lifting (mirrors fullCloseD in single mode).
+    if (d > halfW * 0.4) {
+      const rect = spreadFoldRect(anchorDir);
+      const target = fullCloseDRect(anchorPoint, curN, rect.x0, rect.y0, rect.x1, rect.y1);
+      animateD(target, 440, dragJump, true);
+    } else {
+      animateD(0, 320, dragJump, false);
+    }
     return;
   }
   // Commit once the pointer has actually travelled more than 40% of the
@@ -989,8 +1012,12 @@ function programmaticFlip(dir) {
   anchorDir = dir;
   curN = { x: dir, y: 0 };
   dragJump = flipJump(dir);
-  if (spreadActive) animateD(halfW, 480, dragJump, true);
-  else animateD(fullCloseD(anchorPoint, curN), 480, dragJump, true);
+  if (spreadActive) {
+    const rect = spreadFoldRect(dir);
+    animateD(fullCloseDRect(anchorPoint, curN, rect.x0, rect.y0, rect.x1, rect.y1), 480, dragJump, true);
+  } else {
+    animateD(fullCloseD(anchorPoint, curN), 480, dragJump, true);
+  }
 }
 nextBtn.addEventListener('click', () => { if (canFlip(1)) programmaticFlip(1); });
 prevBtn.addEventListener('click', () => { if (canFlip(-1)) programmaticFlip(-1); });

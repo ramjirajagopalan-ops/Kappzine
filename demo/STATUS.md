@@ -271,6 +271,44 @@ Artifact link shared in chat).
     viewport) both work; the full pre-existing single-page regression
     suite was re-run afterward and still passes unchanged.
 
+- **Spread mode corrected against a Heyzine-vs-Kappzine side-by-side
+  recording (2026-08-03, ninth pass).** The eighth pass's straight,
+  non-leaning spine hinge was wrong — user feedback: *"the page curl
+  effect is totally bad in ours. it has be that lean effect for sure."*
+  A frame-by-frame look at the user's own side-by-side comparison video
+  (`e1f2d2cf-Recording_20260803_180338.mp4`) confirmed two separate
+  problems:
+  - **Sizing**: Heyzine keeps each page the SAME size when it opens from
+    a single cover into a two-page spread (the spread just gets roughly
+    twice as wide overall) — Kappzine's spread pages were visibly
+    smaller, because `resize()` was computing each half's target size as
+    "the available width divided by two," halving the per-page budget
+    before even checking whether two pages actually fit. Fixed by
+    deriving the per-page size the SAME way single mode does (height-
+    driven, capped at 460x660) and ONLY shrinking it if two of them
+    genuinely can't fit the viewport. Verified: cover and spread now
+    render at the identical per-page width for the same viewport.
+  - **Curl shape**: a spread's flip leans and tapers exactly like single-
+    page mode's corner-peel — it is not a plain straight-across spine
+    hinge. Fixed by generalizing `renderCornerCurl` itself (rather than
+    keeping a separate straight-fold implementation) to accept an
+    explicit page rect, an image-placement offset, and an optional
+    `flapTexture` — called with the full canvas and no texture from
+    single-page mode (bit-for-bit identical behavior, confirmed by
+    re-running the entire pre-existing regression suite unchanged
+    afterward) and with the flipping half's own rect + the real upcoming
+    page's image from spread mode. `pointermove`'s spread branch now
+    reuses the exact single-page lean-decay formula, just scoped to
+    `halfW` instead of `W`. `fullCloseD` was similarly generalized into a
+    rect-parametrized `fullCloseDRect`, with `fullCloseD` becoming a
+    thin full-canvas wrapper around it.
+  - Verified: the corner-peel now grows a small tapered triangular
+    curl from the grabbed corner and widens into a full diagonal fold
+    exactly like single-page mode, with the real next-page artwork
+    visible on the flap (matching the reference video); the full
+    single-page regression suite, the spread navigation/boundary tests,
+    and the responsive mode-toggle tests were all re-run and still pass.
+
 ## Still open
 - Port the finalized engine (single + double-page spread) into
   `FlipbookViewer.tsx`, replacing StPageFlip — deferred, needs explicit
