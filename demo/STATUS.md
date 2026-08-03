@@ -383,6 +383,47 @@ Artifact link shared in chat).
     step, and the entire pre-existing single-page regression suite still
     passes.
 
+- **The cover stays visible and continuously reveals the spread underneath
+  it — no separate "curl phase" then "morph phase" (2026-08-03, twelfth
+  pass).** User feedback with a Heyzine screenshot: mid-flip, the cover's
+  curl is large and STILL VISIBLE, with BOTH destination pages already
+  fully rendered underneath it — not something that only appears after
+  the curl finishes. The eleventh pass's "curl completes flat within a
+  single-page canvas, THEN grow the canvas afterward" was two disconnected
+  steps; Heyzine does one continuous thing.
+  - Rebuilt as `renderBoundaryOpening`/`renderBoundaryClosing`: canvas
+    width is now tied DIRECTLY to the drag distance `d` itself (as a
+    fraction of this gesture's own closure distance), via
+    `boundaryCanvasWidth()` — not a separately-timed animation. Page 2
+    stays statically drawn at its final position the whole time; only
+    the cover's own curl (single-page geometry, scoped to the left half)
+    is actually animating, and growing/shrinking canvas.width naturally
+    reveals or crops it since nothing else needs to move. `runGrowMorph`/
+    `runShrinkMorph` from the eleventh pass are kept only as a fallback
+    for the back-cover boundary, not yet re-verified against reference
+    footage the way the front cover now is.
+  - Since the canvas resizes mid-gesture, canvas-relative pointer
+    coordinates would feed the canvas's own shifting, re-centering
+    position back into the very drag distance driving it — switched to
+    CLIENT-space (viewport) coordinates for this gesture specifically to
+    avoid that feedback loop.
+  - Caught and fixed two more issues along the way: (1) a real pairing
+    bug in the interior spread formula when closing toward the BACK
+    cover specifically (no valid "next" pairing to shift into, so the
+    flap must settle back onto its own original slot, not the opposite
+    one); (2) sizing the spread's dimensions fresh right at the moment a
+    front-cover drag starts caused a visible snap in viewports wide
+    enough for auto-spread but too narrow for two full-size pages
+    (~640-1020px) — fixed by making the cover's OWN at-rest size already
+    account for that constraint (`computeSingleDims`), so there's nothing
+    to snap to when a boundary gesture picks up from it.
+  - Verified: canvas width now tracks the drag itself frame-by-frame
+    (e.g. 483→538→631→722→811→899→920px across increasing drag distances,
+    matching the fraction dragged, not a fixed-duration animation) in
+    both directions; the full navigation cycle, the previously-regressed
+    jitter/hover/lean tests, and the sizing tests were all re-verified
+    afterward.
+
 ## Still open
 - Port the finalized engine (single + double-page spread) into
   `FlipbookViewer.tsx`, replacing StPageFlip — deferred, needs explicit

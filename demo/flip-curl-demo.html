@@ -392,20 +392,59 @@ let dragStart = { x: 0, y: 0 };
 // the "obvious" ±1 / ±2 right at a cover boundary (see flipJump).
 let dragJump = 1;
 
-// True only while dragging (or animating) FROM an interior spread BACK
-// toward a cover — see canFlip's comment for why this is a genuinely
-// different gesture from a normal interior spread flip: currentIndex+1
-// (the interior spread's static side) has no role here, since the
-// destination is a single cover page, not another spread. Left false
-// (the default), renderSpread's normal interior formulas would apply
-// here — which happen to be well-defined but WRONG for this direction
-// (they compute a "new right page" pairing that doesn't exist next to a
-// cover), producing a blank/broken half-spread instead of a proper
-// closing curl. This flag routes rendering to renderBoundaryClosing
-// instead, which reuses the exact single-page curl (blank paper-back,
-// no lean-free spine hinge) scoped to just the flipping page's own half
-// of the canvas.
-let boundaryClosing = false;
+// Front-cover <-> first-spread transitions, specifically (the back-cover
+// boundary still uses the older grow/shrink morph further down — see
+// runGrowMorph/runShrinkMorph). A side-by-side Heyzine screenshot showed
+// the destination spread is ALREADY fully visible, in full, from the
+// very start of the cover's own peel — not something that appears only
+// once the curl finishes and a separate resize/morph runs afterward.
+// boundaryOpening/boundaryClosing route rendering to dedicated functions
+// that keep the canvas at ITS OWN width the whole time by tying
+// canvas.width directly to `d` (see renderBoundaryOpening/Closing) —
+// there's no separate "pop" or "morph" phase at all, because the width
+// is just another quantity derived from the drag itself, exactly like
+// the curl geometry.
+let boundaryOpening = false; // dragging the front cover open (currentIndex===0)
+let boundaryClosing = false; // dragging an interior spread back to the front cover
+// The two widths canvas.width interpolates between during a boundary
+// gesture (single-page width <-> spread width), and the pointer
+// position at gesture-start in CLIENT (viewport) coordinates — not
+// canvas-relative — because the canvas itself resizes and re-centers
+// (via the flex-centered stage-wrapper) AS `d` changes during exactly
+// this gesture; measuring drag distance in canvas-relative coordinates
+// would feed the canvas's own shifting position back into the distance
+// driving it.
+let boundaryFromW = 0, boundaryToW = 0;
+let dragStartClient = { x: 0, y: 0 };
+
+function computeSpreadDims(wrapperRect) {
+  const aspect = 380 / 540;
+  let w = wrapperRect.height * aspect, h = wrapperRect.height;
+  if (w > 460) { w = 460; h = w / aspect; }
+  if (h > 660) { h = 660; w = h * aspect; }
+  const avail = (wrapperRect.width - 100) / 2;
+  if (w > avail) { w = avail; h = w / aspect; }
+  return { halfW: Math.round(w), H: Math.round(h) };
+}
+function computeSingleDims(wrapperRect) {
+  const aspect = 380 / 540;
+  let w = wrapperRect.width - 90, h = wrapperRect.height;
+  if (w / h > aspect) w = h * aspect; else h = w / aspect;
+  w = Math.min(w, 460); h = Math.min(h, 660);
+  // Whenever a spread is reachable from here (pairingActive), the cover
+  // must already be sized to whatever the eventual spread can actually
+  // fit — otherwise a viewport wide enough to trigger auto-spread but
+  // too narrow for two FULL-size pages (roughly 640-1020px) would open
+  // into a visibly SMALLER spread than the cover was, snapping right at
+  // the start of the drag before any real curl motion. Pre-shrinking the
+  // at-rest cover to match keeps the two continuous with each other, so
+  // there's nothing to snap.
+  if (pairingActive(wrapperRect.width)) {
+    const avail = (wrapperRect.width - 100) / 2;
+    if (w > avail) { w = avail; h = w / aspect; }
+  }
+  return { W: Math.round(w), H: Math.round(h) };
+}
 
 // A small, un-clicked "you can turn this page" hint — hovering near an
 // edge eases in a small corner curl, same as Heyzine does before you've
@@ -694,35 +733,76 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n, rectOpts) {
 }
 
 function render() {
-  if (boundaryClosing) renderBoundaryClosing();
+  if (boundaryOpening) renderBoundaryOpening();
+  else if (boundaryClosing) renderBoundaryClosing();
   else if (spreadActive) renderSpread();
   else renderSingle();
 }
 
-// Closing from an interior spread back to a cover: the flipping page
-// (currentIndex, since anchorDir is always -1 here) folds within just
-// its own half of the canvas — reusing single-page mode's plain paper-
-// back curl (no texture, no lean-free hinge) via renderCornerCurl's rect
-// options — revealing the cover underneath. The other half of the
-// (still spread-sized) canvas is left blank throughout; the post-commit
-// shrink morph (see runShrinkMorph) takes over from exactly this point,
-// animating the canvas narrower to crop that blank half away rather
-// than popping straight to the single-page layout.
-function renderBoundaryClosing() {
-  ctx.clearRect(0, 0, W, H);
+// Ties the canvas's own on-screen width directly to the drag distance
+// `d` (as a fraction of this gesture's own closure distance) instead of
+// a separately-timed animation — the SAME mechanism that already drives
+// the curl geometry itself, so the stage's width is never "ahead of" or
+// "behind" what the user is actually seeing lift. Growing/shrinking
+// canvas.width naturally reveals or crops whatever's already drawn at
+// its final absolute position, with nothing extra to track.
+function boundaryCanvasWidth(closeD) {
+  const t = Math.max(0, Math.min(1, d / closeD));
+  return Math.max(1, Math.round(boundaryFromW + (boundaryToW - boundaryFromW) * t));
+}
+
+// Opening the front cover into the first spread. Per a side-by-side
+// Heyzine screenshot, the destination spread (page 1 AND page 2) is
+// already fully visible underneath the cover from the very start of its
+// peel — the earlier version only revealed page 1 (still within a
+// single-page-sized canvas) and grew the canvas to show page 2 only
+// AFTER the curl had already finished, which read as two disconnected
+// steps instead of one continuous motion. Page 2 now stays statically
+// drawn at its final position the entire time; only the cover's own
+// curl (scoped to just the left half, exactly like single-page mode's
+// geometry) is actually animating.
+function renderBoundaryOpening() {
+  const closeD = fullCloseDRect(anchorPoint, curN, 0, 0, halfW, H);
+  const curW = boundaryCanvasWidth(closeD);
+  if (canvas.width !== curW) { canvas.width = curW; canvas.style.width = curW + 'px'; }
+  if (canvas.height !== H) { canvas.height = H; canvas.style.height = H + 'px'; }
+  ctx.clearRect(0, 0, curW, H);
+  ctx.drawImage(pageImg(currentIndex + 2), halfW, 0, halfW, H);
   if (d <= 0.5) {
     ctx.drawImage(pageImg(currentIndex), 0, 0, halfW, H);
-    updateIndicator();
-    return;
+  } else if (d >= closeD - 1) {
+    ctx.drawImage(pageImg(currentIndex + 1), 0, 0, halfW, H);
+  } else {
+    renderCornerCurl(pageImg(currentIndex), pageImg(currentIndex + 1), d, anchorPoint, curN, {
+      x0: 0, y0: 0, x1: halfW, y1: H, imgOffX: 0, imgOffY: 0,
+    });
   }
+  drawSpineShadow();
+  updateIndicator();
+}
+
+// Closing an interior spread back to the front cover — the mirror of
+// renderBoundaryOpening above: page 2 (currentIndex+1) stays visible the
+// whole time at its own final position, while page 1 (currentIndex)
+// peels back within just the left half to reveal the cover, and the
+// canvas narrows in the same direct, d-driven way.
+function renderBoundaryClosing() {
   const closeD = fullCloseDRect(anchorPoint, curN, 0, 0, halfW, H);
-  if (d >= closeD - 1) {
+  const curW = boundaryCanvasWidth(closeD);
+  if (canvas.width !== curW) { canvas.width = curW; canvas.style.width = curW + 'px'; }
+  if (canvas.height !== H) { canvas.height = H; canvas.style.height = H + 'px'; }
+  ctx.clearRect(0, 0, curW, H);
+  ctx.drawImage(pageImg(currentIndex + 1), halfW, 0, halfW, H);
+  if (d <= 0.5) {
+    ctx.drawImage(pageImg(currentIndex), 0, 0, halfW, H);
+  } else if (d >= closeD - 1) {
     ctx.drawImage(pageImg(currentIndex + anchorDir), 0, 0, halfW, H);
   } else {
     renderCornerCurl(pageImg(currentIndex), pageImg(currentIndex + anchorDir), d, anchorPoint, curN, {
       x0: 0, y0: 0, x1: halfW, y1: H, imgOffX: 0, imgOffY: 0,
     });
   }
+  drawSpineShadow();
   updateIndicator();
 }
 
@@ -804,7 +884,14 @@ function renderSpread() {
     // release, instead of the flap visibly arriving there — exactly the
     // "suddenly 3 and 4 appear, not smooth" jump the user's own
     // side-by-side recording caught.
-    const restX = dir === 1 ? 0 : halfW;
+    //
+    // That "opposite side" rule only holds when there IS a new pairing
+    // to shift into (revealIdx valid) — heading into the back cover
+    // boundary (no revealIdx), the flap has nothing to pair with on the
+    // far side, so it settles back onto its OWN original slot instead
+    // (rect.imgOffX), leaving the static side undisturbed.
+    const hasNewPairing = revealIdx >= 0 && revealIdx <= PAGES.length - 1;
+    const restX = hasNewPairing ? (dir === 1 ? 0 : halfW) : rect.imgOffX;
     ctx.drawImage(pageImg(flapIdx), restX, 0, halfW, H);
   } else {
     renderCornerCurl(foldingImg, null, d, anchorPoint, curN, {
@@ -871,14 +958,8 @@ function updateIndicator() {
 // on their own, with no need to separately track or fade page positions.
 function runGrowMorph(leftIdx, rightIdx, duration) {
   const startW = canvas.width;
-  const rect = stageWrapper.getBoundingClientRect();
-  const aspect = 380 / 540;
-  let w = rect.height * aspect, h = rect.height;
-  if (w > 460) { w = 460; h = w / aspect; }
-  if (h > 660) { h = 660; w = h * aspect; }
-  const avail = (rect.width - 100) / 2;
-  if (w > avail) { w = avail; h = w / aspect; }
-  halfW = Math.round(w); H = Math.round(h); W = halfW * 2;
+  const dims = computeSpreadDims(stageWrapper.getBoundingClientRect());
+  halfW = dims.halfW; H = dims.H; W = halfW * 2;
   buildPages();
 
   canvas.height = H; canvas.style.height = H + 'px';
@@ -901,12 +982,8 @@ function runGrowMorph(leftIdx, rightIdx, duration) {
 
 function runShrinkMorph(soloIdx, duration) {
   const startW = canvas.width;
-  const rect = stageWrapper.getBoundingClientRect();
-  const aspect = 380 / 540;
-  let w = rect.width - 90, h = rect.height;
-  if (w / h > aspect) w = h * aspect; else h = w / aspect;
-  w = Math.min(w, 460); h = Math.min(h, 660);
-  W = Math.round(w); H = Math.round(h); halfW = W;
+  const dims = computeSingleDims(stageWrapper.getBoundingClientRect());
+  W = dims.W; H = dims.H; halfW = W;
   buildPages();
 
   canvas.height = H; canvas.style.height = H + 'px';
@@ -943,33 +1020,50 @@ function animateD(target, duration, dir, commit) {
       // to equal the old fixed worst-case ceiling — that inference broke
       // once the target became the per-drag saturation point instead.
       if (commit) {
+        const wasBoundaryOpening = boundaryOpening;
+        const wasBoundaryClosing = boundaryClosing;
         const wasSpread = spreadActive;
         currentIndex = Math.max(0, Math.min(PAGES.length - 1, currentIndex + dir));
         playFlipSound();
         d = 0;
-        const rect = stageWrapper.getBoundingClientRect();
-        const willBeSpread = computeSpreadActive(rect.width);
-        if (!wasSpread && willBeSpread) {
-          // Opening a cover into its first spread — grow the stage
-          // smoothly instead of popping straight to spread width (see
-          // the note above runGrowMorph).
-          runGrowMorph(currentIndex, currentIndex + 1, 380);
-        } else if (wasSpread && !willBeSpread) {
-          // Closing an interior spread back to a cover — the mirror of
-          // the above.
-          runShrinkMorph(currentIndex, 380);
+        if (wasBoundaryOpening || wasBoundaryClosing) {
+          // canvas.width was already animated continuously to its target
+          // in lockstep with `d` throughout the drag/release (see
+          // boundaryCanvasWidth) — there's nothing left to pop or morph,
+          // just settle into the normal render path for wherever we
+          // landed.
+          spreadActive = wasBoundaryOpening;
+          boundaryOpening = false;
+          boundaryClosing = false;
+          render();
         } else {
-          // No cover boundary crossed (interior spread <-> interior
-          // spread, or plain single-page mode throughout) — dimensions
-          // don't change, so a direct resize()/render() is already cheap
-          // and smooth; no morph needed.
-          resize();
+          const rect = stageWrapper.getBoundingClientRect();
+          const willBeSpread = computeSpreadActive(rect.width);
+          if (!wasSpread && willBeSpread) {
+            // Only the back-cover boundary still takes this path (the
+            // front cover is handled above) — grow the stage smoothly
+            // instead of popping straight to spread width.
+            runGrowMorph(currentIndex, currentIndex + 1, 380);
+          } else if (wasSpread && !willBeSpread) {
+            runShrinkMorph(currentIndex, 380);
+          } else {
+            // No cover boundary crossed (interior spread <-> interior
+            // spread, or plain single-page mode throughout) — dimensions
+            // don't change, so a direct resize()/render() is already
+            // cheap and smooth; no morph needed.
+            resize();
+          }
         }
       } else {
-        // Springback: if this was an aborted attempt to close back to a
-        // cover, boundaryClosing must not stay stuck true afterward — a
-        // later, unrelated render() call (e.g. from the hover hint) would
-        // otherwise keep routing through renderBoundaryClosing() forever.
+        // Springback: if this was an aborted boundary gesture, these
+        // flags must not stay stuck true afterward — a later, unrelated
+        // render() call (e.g. from the hover hint) would otherwise keep
+        // routing through the boundary render paths forever. Restore
+        // the canvas to whatever it was actually showing at rest too,
+        // since a boundary gesture may have already resized it before
+        // springing back.
+        if (boundaryOpening || boundaryClosing) resize();
+        boundaryOpening = false;
         boundaryClosing = false;
         d = 0;
         render();
@@ -992,7 +1086,6 @@ function maxD() { return Math.max(W, H) * 1.15; }
 
 function resize() {
   const rect = stageWrapper.getBoundingClientRect();
-  const aspect = 380 / 540;
   spreadActive = computeSpreadActive(rect.width);
 
   if (spreadActive) {
@@ -1005,19 +1098,14 @@ function resize() {
     // single cover at the same viewport, which is backwards from how an
     // open book actually reads — Heyzine's own reference keeps each
     // page's size the same when it opens into a spread.
-    let h = rect.height, w = h * aspect;
-    if (w > 460) { w = 460; h = w / aspect; }
-    if (h > 660) { h = 660; w = h * aspect; }
-    const avail = (rect.width - 100) / 2;
-    if (w > avail) { w = avail; h = w / aspect; }
-    halfW = Math.round(w); H = Math.round(h);
-    W = halfW * 2;
+    const dims = computeSpreadDims(rect);
+    halfW = dims.halfW; H = dims.H; W = halfW * 2;
   } else {
-    let w = rect.width - 90, h = rect.height;
-    if (w / h > aspect) w = h * aspect; else h = w / aspect;
-    w = Math.min(w, 460); h = Math.min(h, 660);
-    W = Math.round(w); H = Math.round(h);
-    halfW = W;
+    // See computeSingleDims' own note: this already pre-shrinks to match
+    // a reachable spread's own constrained size, so there's nothing to
+    // snap when a boundary gesture later picks up from here.
+    const dims = computeSingleDims(rect);
+    W = dims.W; H = dims.H; halfW = W;
   }
   canvas.width = W; canvas.height = H;
   canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
@@ -1042,13 +1130,42 @@ canvas.addEventListener('pointerdown', (e) => {
   if (!canFlip(dir)) return;
   cancelAnimationFrame(animId);
   setHoverTarget(0, dir); // a real drag is starting — drop the hover hint
+
+  dragJump = flipJump(dir);
+  // Scoped specifically to the FRONT cover, where this has actually been
+  // checked against reference footage — the back-cover boundary still
+  // falls through to the older grow/shrink-morph path below.
+  boundaryOpening = currentIndex === 0 && dir === 1;
+  boundaryClosing = currentIndex === 1 && dir === -1;
+  dragStartClient = { x: e.clientX, y: e.clientY };
+
+  if (boundaryOpening) {
+    // Grab the target spread's dimensions NOW — halfW/H/W become the
+    // spread's from this instant, even though canvas.width itself will
+    // only animate up to W as `d` grows (see boundaryCanvasWidth) — but
+    // this canvas resize (and the page-image rebuild it needs) happens
+    // once, right at the moment of pressing down, before any visible
+    // motion, not mid-gesture or after release.
+    boundaryFromW = canvas.width;
+    const wrapperRect = stageWrapper.getBoundingClientRect();
+    const dims = computeSpreadDims(wrapperRect);
+    halfW = dims.halfW; H = dims.H; W = halfW * 2;
+    boundaryToW = W;
+    buildPages();
+  } else if (boundaryClosing) {
+    boundaryFromW = canvas.width; // already the spread's width
+    const wrapperRect = stageWrapper.getBoundingClientRect();
+    boundaryToW = computeSingleDims(wrapperRect).W;
+  }
+
   // Anchor to wherever the reader actually grabbed the edge (this exact
-  // y), not a corner — see the note above anchorPoint's declaration.
-  anchorPoint = { x: dir === 1 ? W : 0, y };
+  // y), not a corner — see the note above anchorPoint's declaration. A
+  // front-cover boundary gesture anchors at halfW (the cover's own free
+  // edge), not W (the whole, eventually-wider, spread).
+  const anchorX = (boundaryOpening || boundaryClosing) ? (dir === 1 ? halfW : 0) : (dir === 1 ? W : 0);
+  anchorPoint = { x: anchorX, y };
   dragStart = { x, y };
   anchorDir = dir;
-  dragJump = flipJump(dir);
-  boundaryClosing = spreadActive && isCoverIdx(currentIndex + dragJump);
   curN = { x: dir, y: 0 };
   dragging = true;
   canvas.setPointerCapture(e.pointerId);
@@ -1073,7 +1190,7 @@ canvas.addEventListener('pointermove', (e) => {
     setHoverTarget(canGo ? legLen * Math.SQRT1_2 : 0, dir || hoverDir, corner);
     return;
   }
-  if (spreadActive) {
+  if (spreadActive || boundaryOpening) {
     // Same leaning corner-peel as single-page mode — a side-by-side
     // recording against Heyzine's own spread flip showed it leans and
     // tapers just like the single-page one, not a straight spine hinge
@@ -1081,7 +1198,22 @@ canvas.addEventListener('pointermove', (e) => {
     // difference from single mode is scale: "the page" here is only
     // halfW wide, not the whole canvas, so the drag-distance clamp and
     // the lean's own progress-toward-closing both use halfW instead of W.
-    const vx = dragStart.x - x, vy = dragStart.y - y;
+    //
+    // For a front-cover boundary gesture specifically (opening or
+    // closing), the distance is measured in CLIENT (viewport)
+    // coordinates instead of canvas-relative ones: the canvas itself is
+    // resizing and re-centering, live, AS `d` changes during exactly
+    // this gesture (see renderBoundaryOpening/Closing), so a canvas-
+    // relative reading of the same still pointer would drift as the
+    // canvas's own bounding box shifts under it — feeding the canvas's
+    // motion back into the distance that's driving it.
+    let vx, vy;
+    if (boundaryOpening || boundaryClosing) {
+      vx = dragStartClient.x - e.clientX;
+      vy = dragStartClient.y - e.clientY;
+    } else {
+      vx = dragStart.x - x; vy = dragStart.y - y;
+    }
     const len = Math.hypot(vx, vy);
     const JITTER_DEAD_ZONE = 6;
     d = Math.max(0, Math.min(Math.max(halfW, H) * 1.15, len - JITTER_DEAD_ZONE));
@@ -1132,11 +1264,22 @@ canvas.addEventListener('pointermove', (e) => {
 canvas.addEventListener('pointerup', () => {
   if (!dragging) return;
   dragging = false;
+  if (boundaryOpening) {
+    // The cover's own rect is always {0,halfW} — spreadFoldRect(1) would
+    // wrongly give {halfW,W} (a normal interior right-page's rect), so
+    // this can't reuse it the way the plain spreadActive branch below
+    // does.
+    if (d > halfW * 0.4) animateD(fullCloseDRect(anchorPoint, curN, 0, 0, halfW, H), 440, dragJump, true);
+    else animateD(0, 320, dragJump, false);
+    return;
+  }
   if (spreadActive) {
     // Same 40%-of-the-page-width commit rule as single mode, just scaled
     // to one page's own width (halfW) instead of the whole spread's, and
     // the animation target is this lean's own closure distance for the
     // half that's actually lifting (mirrors fullCloseD in single mode).
+    // (boundaryClosing also lands here — spreadFoldRect(-1) happens to
+    // give exactly the {0,halfW} rect it needs too.)
     if (d > halfW * 0.4) {
       const rect = spreadFoldRect(anchorDir);
       const target = fullCloseDRect(anchorPoint, curN, rect.x0, rect.y0, rect.x1, rect.y1);
@@ -1169,12 +1312,30 @@ canvas.addEventListener('pointerleave', () => {
 });
 
 function programmaticFlip(dir) {
-  anchorPoint = { x: dir === 1 ? W : 0, y: H / 2 };
+  dragJump = flipJump(dir);
+  boundaryOpening = currentIndex === 0 && dir === 1;
+  boundaryClosing = currentIndex === 1 && dir === -1;
+
+  if (boundaryOpening) {
+    boundaryFromW = canvas.width;
+    const wrapperRect = stageWrapper.getBoundingClientRect();
+    const dims = computeSpreadDims(wrapperRect);
+    halfW = dims.halfW; H = dims.H; W = halfW * 2;
+    boundaryToW = W;
+    buildPages();
+  } else if (boundaryClosing) {
+    boundaryFromW = canvas.width;
+    boundaryToW = computeSingleDims(stageWrapper.getBoundingClientRect()).W;
+  }
+
+  const anchorX = (boundaryOpening || boundaryClosing) ? (dir === 1 ? halfW : 0) : (dir === 1 ? W : 0);
+  anchorPoint = { x: anchorX, y: H / 2 };
   anchorDir = dir;
   curN = { x: dir, y: 0 };
-  dragJump = flipJump(dir);
-  boundaryClosing = spreadActive && isCoverIdx(currentIndex + dragJump);
-  if (spreadActive) {
+
+  if (boundaryOpening) {
+    animateD(fullCloseDRect(anchorPoint, curN, 0, 0, halfW, H), 480, dragJump, true);
+  } else if (spreadActive) {
     const rect = spreadFoldRect(dir);
     animateD(fullCloseDRect(anchorPoint, curN, rect.x0, rect.y0, rect.x1, rect.y1), 480, dragJump, true);
   } else {
