@@ -52,7 +52,9 @@
   <p class="subhead">
     A from-scratch canvas page turn (not a library) — grab anywhere on the page and drag; the
     fold always spans the full height, and its lean follows wherever you drag, just like turning
-    a real page. Or use the arrows. Built and tuned against real reference recordings.
+    a real page. Wide viewports open into a two-page spread automatically (or force it with the
+    1 / 2 / A buttons below) — spreads turn on a straight spine hinge instead of leaning. Or use
+    the arrows. Built and tuned against real reference recordings.
   </p>
 
   <main id="mainArea">
@@ -67,6 +69,10 @@
     </div>
 
     <div class="toolbar">
+      <button class="btn" id="mode1Btn" title="Single page">1</button>
+      <button class="btn" id="mode2Btn" title="Double page">2</button>
+      <button class="btn active" id="modeAutoBtn" title="Auto layout">A</button>
+      <div class="divider"></div>
       <button class="btn" id="soundBtn" title="Flip sound"></button>
       <button class="btn" id="fullscreenBtn" title="Fullscreen"></button>
     </div>
@@ -244,6 +250,9 @@ const ICONS = {
 };
 
 let W = 0, H = 0;
+let halfW = 0; // width of one page when a two-page spread is showing (===W in single mode)
+let VIEW_MODE = 'auto'; // 'single' | 'double' | 'auto' — user's explicit choice
+let spreadActive = false; // computed each resize(): are we showing a spread right now?
 let PAGES = [];
 let currentIndex = 0;
 let d = 0; // corner-peel reach in px (0 = flat)
@@ -278,12 +287,78 @@ function playFlipSound() {
 }
 
 function buildPages() {
+  // Every page image is rendered at its own single-page footprint
+  // (halfW x H) — in single mode halfW === W so this is unchanged from
+  // before; in a two-page spread, W is the full spread's width (2 *
+  // halfW) but each PAGE bitmap still only covers one leaf of it, so it
+  // can be drawn at either half of the canvas without distortion.
   PAGES = [];
-  for (let i = 0; i < 6; i++) PAGES.push(debugPage(W, H, i, `PAGE ${i}`));
+  for (let i = 0; i < 6; i++) PAGES.push(debugPage(halfW, H, i, `PAGE ${i}`));
 }
 
 function pageImg(i) {
   return PAGES[Math.max(0, Math.min(PAGES.length - 1, i))];
+}
+
+// Front/back covers are always shown single, never as half of a spread —
+// matches how a real book (and Heyzine) only ever shows a two-page
+// spread for interior pages.
+function isCoverIdx(i) { return i === 0 || i === PAGES.length - 1; }
+
+// Whether two-page pairing applies to navigation AT ALL right now — independent
+// of whether the CURRENT page happens to be a (always-single) cover, which is
+// why this is a separate check from computeSpreadActive below.
+function pairingActive(wrapperWidth) {
+  if (VIEW_MODE === 'single') return false;
+  if (VIEW_MODE === 'double') return true;
+  return wrapperWidth > 640; // 'auto' — spread only once there's room for one
+}
+
+function computeSpreadActive(wrapperWidth) {
+  return pairingActive(wrapperWidth) && !isCoverIdx(currentIndex);
+}
+
+// Where a forward/back flip from `idx` lands. When pairing is active,
+// covers are the odd ones out: leaving the FRONT cover only advances by
+// one page (into the first spread's LEFT slot), but returning to the
+// BACK cover's previous spread has to skip back by two (the page right
+// before it, N-2, is already the RIGHT half of that previous spread, not
+// a spread of its own) — the two directions are not simply mirror images
+// of each other. Getting this wrong is exactly what caused stepping back
+// from the last spread to land on an unpaired, off-by-one spread instead
+// of the correct one.
+function nextIndexFrom(idx, wrapperWidth) {
+  const count = PAGES.length;
+  if (!pairingActive(wrapperWidth)) return Math.min(count - 1, idx + 1);
+  if (idx >= count - 1) return idx;
+  if (idx === 0) return 1;
+  const targetLeft = idx + 2;
+  return targetLeft >= count - 1 ? count - 1 : targetLeft;
+}
+function prevIndexFrom(idx, wrapperWidth) {
+  const count = PAGES.length;
+  if (!pairingActive(wrapperWidth)) return Math.max(0, idx - 1);
+  if (idx <= 0) return idx;
+  if (idx >= count - 1) return Math.max(0, idx - 2);
+  if (idx <= 1) return 0;
+  return idx - 2;
+}
+
+// Whether a flip in `dir` (1 = forward, -1 = back) lands on a valid page.
+function canFlip(dir) {
+  const rect = stageWrapper.getBoundingClientRect();
+  const target = dir === 1 ? nextIndexFrom(currentIndex, rect.width) : prevIndexFrom(currentIndex, rect.width);
+  return target !== currentIndex;
+}
+
+// How far `currentIndex` should actually move for a flip in `dir`,
+// computed once at gesture-start (pointerdown / programmaticFlip) and
+// held fixed for the rest of that gesture — see canFlip's comment for
+// why this isn't always ±1 (single) or ±2 (spread).
+function flipJump(dir) {
+  const rect = stageWrapper.getBoundingClientRect();
+  const target = dir === 1 ? nextIndexFrom(currentIndex, rect.width) : prevIndexFrom(currentIndex, rect.width);
+  return target - currentIndex;
 }
 
 // The anchor is wherever the reader actually grabbed the edge — NOT
@@ -309,6 +384,12 @@ let anchorDir = 1; // 1 = right edge (next), -1 = left edge (prev)
 // that: distance is genuinely 0 right after a click, no matter where in
 // the edge zone it landed.
 let dragStart = { x: 0, y: 0 };
+
+// How far currentIndex actually moves on a commit for the gesture in
+// progress — computed once at pointerdown/programmaticFlip time via
+// flipJump() and held fixed for the gesture, since it can differ from
+// the "obvious" ±1 / ±2 right at a cover boundary (see flipJump).
+let dragJump = 1;
 
 // A small, un-clicked "you can turn this page" hint — hovering near an
 // edge eases in a small corner curl, same as Heyzine does before you've
@@ -535,6 +616,134 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
 }
 
 function render() {
+  if (spreadActive) renderSpread();
+  else renderSingle();
+}
+
+// ---------------- Two-page spread mode ----------------
+// Interior pages (never the covers) can show as an open-book spread: the
+// static page stays exactly where it is the whole time, the page next to
+// it lifts and folds flat over to reveal the page underneath, and the
+// fold itself never leans (no corner-peel taper) — a spine-hinged leaf
+// turning "straight across" is what Heyzine's own reference recording
+// shows for its double-page view, unlike the corner-grab lean tuned for
+// single-page mode above. Reusing that lean here read as visually wrong
+// once the fold is anchored at a spine instead of a freely-grabbed
+// corner.
+function drawSpineShadow() {
+  const w = Math.min(28, halfW * 0.12);
+  const grad = ctx.createLinearGradient(halfW - w, 0, halfW + w, 0);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(0.5, 'rgba(0,0,0,0.22)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(halfW - w, 0, w * 2, H);
+}
+
+// Draws the currently-lifting leaf as a plain rectangle (no rotation
+// needed — the fold is always vertical in spread mode) spanning
+// [x0,x1], showing `img` squeezed to that width. The image un-squeezes
+// to its natural width by the time the fold finishes (x1-x0 grows to
+// exactly halfW), which is what gives the "unrolling" look without any
+// actual 3D transform.
+function drawFlapRect(x0, x1, img, creaseAtX1) {
+  x0 = Math.max(0, x0); x1 = Math.min(W, x1);
+  const w = x1 - x0;
+  if (w <= 0.5) return;
+
+  // Shadow first, before any clipping to the flap's own rect — clipping
+  // first would cut the blur off exactly at the flap's edge instead of
+  // letting it spill onto the page underneath, the same "shadow reads as
+  // disconnected from the curl" bug the single-page engine hit earlier.
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.4)';
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(x0, 0, w, H);
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0, 0, w, H); ctx.clip();
+  ctx.drawImage(img, x0, 0, w, H);
+
+  // A soft highlight right at the crease (paper catching the light as it
+  // lifts), fading away from it — same idea as the single-page engine's
+  // "roll" band.
+  const bandW = Math.min(46, w * 0.6);
+  const roll = creaseAtX1
+    ? ctx.createLinearGradient(x1, 0, x1 - bandW, 0)
+    : ctx.createLinearGradient(x0, 0, x0 + bandW, 0);
+  roll.addColorStop(0, 'rgba(255,255,255,0.65)');
+  roll.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = roll;
+  if (creaseAtX1) ctx.fillRect(x1 - bandW, 0, bandW, H);
+  else ctx.fillRect(x0, 0, bandW, H);
+  ctx.restore();
+}
+
+// `dd` is the drag distance (0..halfW — a spread's fold fully closes
+// after traveling only one page's own width, not the whole spread's).
+// `dir` is 1 for a forward (right page lifting) flip, -1 for backward
+// (left page lifting).
+function renderSpreadCurl(dd, dir) {
+  const hw = halfW;
+  if (dir === 1) {
+    const staticImg = pageImg(currentIndex);       // left page: untouched
+    const foldingImg = pageImg(currentIndex + 1);  // old right: lifting
+    const flapImg = pageImg(currentIndex + 2);     // becomes the new left
+    const revealIdx = currentIndex + 3;            // becomes the new right
+
+    ctx.drawImage(staticImg, 0, 0, hw, H);
+    if (revealIdx <= PAGES.length - 1) ctx.drawImage(pageImg(revealIdx), hw, 0, hw, H);
+
+    if (dd <= 0.5) { ctx.drawImage(foldingImg, hw, 0, hw, H); drawSpineShadow(); return; }
+
+    const Fx = W - dd;
+    const flapX0 = Math.max(0, W - 2 * dd);
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(hw, 0, Math.max(0, Fx - hw), H); ctx.clip();
+    ctx.drawImage(foldingImg, hw, 0, hw, H);
+    ctx.restore();
+
+    drawFlapRect(flapX0, Fx, flapImg, true);
+  } else {
+    const staticImg = pageImg(currentIndex + 1);   // right page: untouched
+    const foldingImg = pageImg(currentIndex);      // old left: lifting
+    const flapImg = pageImg(currentIndex - 1);     // becomes the new right
+    const revealIdx = currentIndex - 2;            // becomes the new left
+
+    ctx.drawImage(staticImg, hw, 0, hw, H);
+    if (revealIdx >= 0) ctx.drawImage(pageImg(revealIdx), 0, 0, hw, H);
+
+    if (dd <= 0.5) { ctx.drawImage(foldingImg, 0, 0, hw, H); drawSpineShadow(); return; }
+
+    const Fx = dd;
+    const flapX1 = Math.min(W, 2 * dd);
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(Fx, 0, Math.max(0, hw - Fx), H); ctx.clip();
+    ctx.drawImage(foldingImg, 0, 0, hw, H);
+    ctx.restore();
+
+    drawFlapRect(Fx, flapX1, flapImg, false);
+  }
+  drawSpineShadow();
+}
+
+function renderSpread() {
+  ctx.clearRect(0, 0, W, H);
+  if (d > 0.5) {
+    renderSpreadCurl(d, anchorDir);
+  } else {
+    ctx.drawImage(pageImg(currentIndex), 0, 0, halfW, H);
+    ctx.drawImage(pageImg(currentIndex + 1), halfW, 0, halfW, H);
+    drawSpineShadow();
+  }
+  updateIndicator();
+}
+
+function renderSingle() {
   ctx.clearRect(0, 0, W, H);
   if (!dragging && d < 1 && hoverD > 0.5) {
     // Anchored at the exact top corner, leaning at 45° back into the
@@ -567,11 +776,12 @@ function render() {
 
 function updateIndicator() {
   const count = PAGES.length;
-  if (currentIndex === 0 && d < 1) pageIndicator.textContent = 'Cover';
+  if (spreadActive && d < 1) pageIndicator.textContent = `Pages ${currentIndex} – ${currentIndex + 1} / ${count - 1}`;
+  else if (currentIndex === 0 && d < 1) pageIndicator.textContent = 'Cover';
   else if (currentIndex >= count - 1 && d < 1) pageIndicator.textContent = 'Back page';
   else pageIndicator.textContent = `Page ${currentIndex} / ${count - 1}`;
-  prevBtn.disabled = currentIndex <= 0 && d <= 0.5;
-  nextBtn.disabled = currentIndex >= PAGES.length - 1 && d <= 0.5;
+  prevBtn.disabled = !canFlip(-1) && d <= 0.5;
+  nextBtn.disabled = !canFlip(1) && d <= 0.5;
 }
 
 function animateD(target, duration, dir, commit) {
@@ -594,9 +804,17 @@ function animateD(target, duration, dir, commit) {
       if (commit) {
         currentIndex = Math.max(0, Math.min(PAGES.length - 1, currentIndex + dir));
         playFlipSound();
+        d = 0;
+        // A commit can cross the cover/spread boundary (e.g. landing on
+        // the back cover, which is always single) — resize() recomputes
+        // spreadActive and the canvas size for wherever we just landed,
+        // then renders. In-spread commits keep the same size, so this is
+        // a cheap no-op relayout for them.
+        resize();
+      } else {
+        d = 0;
+        render();
       }
-      d = 0;
-      render();
     }
   }
   animId = requestAnimationFrame(step);
@@ -616,10 +834,23 @@ function maxD() { return Math.max(W, H) * 1.15; }
 function resize() {
   const rect = stageWrapper.getBoundingClientRect();
   const aspect = 380 / 540;
-  let w = rect.width - 90, h = rect.height;
-  if (w / h > aspect) w = h * aspect; else h = w / aspect;
-  w = Math.min(w, 460); h = Math.min(h, 660);
-  W = Math.round(w); H = Math.round(h);
+  spreadActive = computeSpreadActive(rect.width);
+
+  if (spreadActive) {
+    // Same per-page aspect ratio as single mode, just fit twice
+    // side-by-side — leaves room for the corner-nav arrows either side.
+    let w = (rect.width - 100) / 2, h = rect.height;
+    if (w / h > aspect) w = h * aspect; else h = w / aspect;
+    w = Math.min(w, 460); h = Math.min(h, 660);
+    halfW = Math.round(w); H = Math.round(h);
+    W = halfW * 2;
+  } else {
+    let w = rect.width - 90, h = rect.height;
+    if (w / h > aspect) w = h * aspect; else h = w / aspect;
+    w = Math.min(w, 460); h = Math.min(h, 660);
+    W = Math.round(w); H = Math.round(h);
+    halfW = W;
+  }
   canvas.width = W; canvas.height = H;
   canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
   buildPages();
@@ -640,8 +871,7 @@ canvas.addEventListener('pointerdown', (e) => {
   const x = e.clientX - rect.left, y = e.clientY - rect.top;
   const dir = edgeZoneDir(x);
   if (!dir) return;
-  if (dir === 1 && currentIndex >= PAGES.length - 1) return;
-  if (dir === -1 && currentIndex <= 0) return;
+  if (!canFlip(dir)) return;
   cancelAnimationFrame(animId);
   setHoverTarget(0, dir); // a real drag is starting — drop the hover hint
   // Anchor to wherever the reader actually grabbed the edge (this exact
@@ -649,6 +879,7 @@ canvas.addEventListener('pointerdown', (e) => {
   anchorPoint = { x: dir === 1 ? W : 0, y };
   dragStart = { x, y };
   anchorDir = dir;
+  dragJump = flipJump(dir);
   curN = { x: dir, y: 0 };
   dragging = true;
   canvas.setPointerCapture(e.pointerId);
@@ -671,6 +902,20 @@ canvas.addEventListener('pointermove', (e) => {
     // above, leg = half / Math.SQRT1_2 (i.e. half = leg * Math.SQRT1_2).
     const legLen = Math.min(60, W * 0.14);
     setHoverTarget(canGo ? legLen * Math.SQRT1_2 : 0, dir || hoverDir, corner);
+    return;
+  }
+  if (spreadActive) {
+    // No lean in spread mode — the fold is hinged at the spine, not
+    // freely grabbed at a corner, so it only ever travels straight
+    // across (see the note above renderSpreadCurl). Reach is simply the
+    // horizontal distance dragged, clamped to one page's own width
+    // (halfW) — that's exactly how far this fold can travel before it's
+    // lying completely flat on the opposite page.
+    const raw = (dragStart.x - x) * anchorDir;
+    const JITTER_DEAD_ZONE = 6;
+    d = Math.max(0, Math.min(halfW, raw - JITTER_DEAD_ZONE));
+    curN = { x: anchorDir, y: 0 };
+    render();
     return;
   }
   // Measure both the reach (d) and the lean direction from dragStart —
@@ -710,6 +955,13 @@ canvas.addEventListener('pointermove', (e) => {
 canvas.addEventListener('pointerup', () => {
   if (!dragging) return;
   dragging = false;
+  if (spreadActive) {
+    // Same 40%-of-the-page-width commit rule as single mode, just scaled
+    // to one page's own width (halfW) instead of the whole spread's.
+    if (d > halfW * 0.4) animateD(halfW, 440, dragJump, true);
+    else animateD(0, 320, dragJump, false);
+    return;
+  }
   // Commit once the pointer has actually travelled more than 40% of the
   // page's width — plain and literal, deliberately not compared against
   // any lean-dependent geometric quantity. Both `lastReach` (the flap's
@@ -722,27 +974,29 @@ canvas.addEventListener('pointerup', () => {
   // dragStart fix above it's already an exact, lean-independent measure
   // of how many pixels the pointer has moved, which is also plainly what
   // a user means by "I dragged it about 40% of the way."
-  if (d > W * 0.4) animateD(fullCloseD(anchorPoint, curN), 440, anchorDir, true);
-  else animateD(0, 320, anchorDir, false);
+  if (d > W * 0.4) animateD(fullCloseD(anchorPoint, curN), 440, dragJump, true);
+  else animateD(0, 320, dragJump, false);
 });
 canvas.addEventListener('pointerleave', () => {
   setHoverTarget(0, hoverDir);
   if (!dragging) return;
   dragging = false;
-  animateD(0, 320, anchorDir, false);
+  animateD(0, 320, dragJump, false);
 });
 
 function programmaticFlip(dir) {
   anchorPoint = { x: dir === 1 ? W : 0, y: H / 2 };
   anchorDir = dir;
   curN = { x: dir, y: 0 };
-  animateD(fullCloseD(anchorPoint, curN), 480, dir, true);
+  dragJump = flipJump(dir);
+  if (spreadActive) animateD(halfW, 480, dragJump, true);
+  else animateD(fullCloseD(anchorPoint, curN), 480, dragJump, true);
 }
-nextBtn.addEventListener('click', () => { if (currentIndex < PAGES.length - 1) programmaticFlip(1); });
-prevBtn.addEventListener('click', () => { if (currentIndex > 0) programmaticFlip(-1); });
+nextBtn.addEventListener('click', () => { if (canFlip(1)) programmaticFlip(1); });
+prevBtn.addEventListener('click', () => { if (canFlip(-1)) programmaticFlip(-1); });
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowRight' && currentIndex < PAGES.length - 1) programmaticFlip(1);
-  if (e.key === 'ArrowLeft' && currentIndex > 0) programmaticFlip(-1);
+  if (e.key === 'ArrowRight' && canFlip(1)) programmaticFlip(1);
+  if (e.key === 'ArrowLeft' && canFlip(-1)) programmaticFlip(-1);
 });
 
 function setSoundIcon() {
@@ -751,6 +1005,20 @@ function setSoundIcon() {
 }
 soundBtn.addEventListener('click', () => { soundOn = !soundOn; setSoundIcon(); });
 setSoundIcon();
+
+const mode1Btn = document.getElementById('mode1Btn');
+const mode2Btn = document.getElementById('mode2Btn');
+const modeAutoBtn = document.getElementById('modeAutoBtn');
+function setViewMode(m) {
+  VIEW_MODE = m;
+  mode1Btn.classList.toggle('active', m === 'single');
+  mode2Btn.classList.toggle('active', m === 'double');
+  modeAutoBtn.classList.toggle('active', m === 'auto');
+  resize();
+}
+mode1Btn.addEventListener('click', () => setViewMode('single'));
+mode2Btn.addEventListener('click', () => setViewMode('double'));
+modeAutoBtn.addEventListener('click', () => setViewMode('auto'));
 
 function setFsIcon() { fullscreenBtn.innerHTML = document.fullscreenElement ? ICONS.compress : ICONS.expand; }
 fullscreenBtn.addEventListener('click', () => {
@@ -770,6 +1038,6 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(resize, 120);
 });
 
-resize();
+setViewMode('auto');
 })();
 </script>

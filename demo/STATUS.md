@@ -230,13 +230,57 @@ Artifact link shared in chat).
   cursor, hover hint, animation smoothness, jitter no-false-commit, 40%
   commit threshold) — all passed.
 
+- **Double-page spread mode added (2026-08-03, eighth pass).** Interior
+  pages (never the front/back cover, which always show single like a real
+  book) now render as a two-page spread on wide viewports, with three
+  explicit modes (1 / 2 / A buttons: single / double / auto — auto spreads
+  once the wrapper is wider than 640px). Studied via extracted frames from
+  the user's own Heyzine reference recording
+  (`6e4b8479-Recording_20260803_173428.mp4`): unlike single-page mode's
+  corner-lean, a spread's fold is hinged at the spine and travels straight
+  across with no lean at all — confirmed by measuring the reference frames,
+  where the fold stays vertical throughout. Implementation notes:
+  - The fold's own closure distance is exactly one page's width (`halfW`),
+    not the whole spread's — dragging a spread's page across its own width
+    fully closes it, mirroring how single-page mode's `fullCloseD` scales
+    to that page's own rectangle.
+  - The flap shows the ACTUAL upcoming page's artwork (squeezed to its
+    current, still-folding width, "unsqueezing" to full size as the fold
+    completes) rather than blank paper — this is what the reference video
+    shows for a spread (real content legible on the curling leaf), unlike
+    single-page mode's blank-paper-plus-highlight flap.
+  - Shadow-before-clip ordering bug caught before shipping: an early draft
+    clipped the flap's shadow to the flap's own rect, which (per the
+    single-page engine's own history) cuts the blur off exactly at the
+    flap's edge instead of letting it spill onto the page underneath.
+    Fixed by drawing the shadow first, unclipped, then clipping only for
+    the image/highlight fill.
+  - Page-pairing bug caught via automated full-cycle navigation test:
+    stepping backward from the back cover landed on an unpaired,
+    off-by-one spread (e.g. pages 4–5 instead of 3–4), because leaving a
+    cover isn't symmetric — advancing from the front cover only steps by
+    1 (into the first spread's left slot), but retreating from the back
+    cover has to step back by 2 (the page just before it is already the
+    right half of the previous spread). Fixed with explicit
+    `nextIndexFrom`/`prevIndexFrom` helpers instead of a flat ±1/±2 rule,
+    and a `flipJump` computed once per gesture so drags and button clicks
+    agree. Verified: a full forward-then-backward navigation cycle through
+    all 6 debug pages now lands on the correct spread/cover at every step.
+  - Verified: manual mode toggles (forcing single or double regardless of
+    width) and the auto breakpoint (falls back to single on a narrow/mobile
+    viewport) both work; the full pre-existing single-page regression
+    suite was re-run afterward and still passes unchanged.
+
 ## Still open
-Nothing outstanding — engine confirmed matching Heyzine's behavior and
-feel as of 2026-08-03 (post-revert). Next step (deferred, needs explicit
-go-ahead): port this into `FlipbookViewer.tsx`, replacing StPageFlip.
-- Double-page spread mode (cover → 2-page spread like a real open magazine,
-  e.g. page 1 back = page 2, shown side-by-side with page 3) — requested by
-  the user, more detail incoming before starting this.
+- Port the finalized engine (single + double-page spread) into
+  `FlipbookViewer.tsx`, replacing StPageFlip — deferred, needs explicit
+  go-ahead. Note: the production upload pipeline (`processPdf.ts`,
+  `/api/flipbooks/[id]/upload`, `FlipbookViewer.tsx`) already exists and
+  already stores each page's own width/height (arbitrary PDF page sizes,
+  mixed portrait/landscape) and already renders responsively via
+  StPageFlip's single/double/auto modes — the port is about swapping the
+  page-turn *rendering* to this custom engine, not building upload/
+  responsiveness from scratch.
 - Once debug colors are no longer needed, swap back in `magazinePage()` /
   `coverArt()` (already written in the file, currently unused) for realistic
   page content.
