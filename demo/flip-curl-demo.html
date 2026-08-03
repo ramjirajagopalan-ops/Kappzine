@@ -25,8 +25,7 @@
   .subhead { max-width: 620px; margin: 2px clamp(16px,4vw,40px) 0; font-size: 13px; line-height: 1.5; color: var(--muted); flex: 0 0 auto; }
   main { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 0; padding: 14px clamp(12px,4vw,40px) 6px; gap: 10px; }
   .stage-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; flex: 1 1 auto; min-height: 0; position: relative; }
-  #stageCanvas { touch-action: none; cursor: grab; box-shadow: 0 30px 90px -20px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.04); border-radius: 2px; max-width: 100%; max-height: 100%; }
-  #stageCanvas:active { cursor: grabbing; }
+  #stageCanvas { touch-action: none; cursor: default; box-shadow: 0 30px 90px -20px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.04); border-radius: 2px; max-width: 100%; max-height: 100%; }
   .corner-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border-radius: 999px; border: 1px solid var(--line); background: #ffffff; color: var(--ink); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: border-color .16s, color .16s, opacity .16s; z-index: 5; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
   .corner-nav:hover { border-color: var(--accent); color: var(--accent); }
   .corner-nav:disabled { opacity: .3; cursor: default; border-color: var(--line); color: var(--ink); }
@@ -299,6 +298,24 @@ function pageImg(i) {
 let anchorPoint = { x: 0, y: 0 };
 let anchorDir = 1; // 1 = right edge (next), -1 = left edge (prev)
 
+// A small, un-clicked "you can turn this page" hint — hovering near an
+// edge eases in a small corner curl, same as Heyzine does before you've
+// even pressed down, instead of giving no visual feedback until a drag
+// actually starts.
+let hoverD = 0, hoverTarget = 0, hoverDir = 1, hoverAnimId = null;
+function hoverStep() {
+  const diff = hoverTarget - hoverD;
+  hoverD = Math.abs(diff) < 0.4 ? hoverTarget : hoverD + diff * 0.2;
+  if (!dragging && d < 1) render();
+  if (Math.abs(hoverTarget - hoverD) > 0.4) hoverAnimId = requestAnimationFrame(hoverStep);
+  else hoverAnimId = null;
+}
+function setHoverTarget(target, dir) {
+  hoverDir = dir;
+  hoverTarget = target;
+  if (!hoverAnimId) hoverAnimId = requestAnimationFrame(hoverStep);
+}
+
 // Fills the local-space band between lx=lo and lx=hi across the WHOLE
 // page height (no taper to a point) — the fold line is straight, at
 // whatever angle the pointer is currently at, but the folded flap always
@@ -334,6 +351,10 @@ function clipHalfPlaneLX(poly) {
   }
   return out;
 }
+
+// How much of the page (in px) is actually visibly folded over right
+// now, updated on every renderCornerCurl call — see its use in pointerup.
+let lastReach = 0;
 
 // Renders a full-height page fold as a flat mirror-fold — the reflected
 // edge lands exactly at the drag point, direction tracks the pointer
@@ -456,6 +477,13 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
   // highlight/shadow hugging the fold line. So: flat white base for the
   // whole flap, then a narrow "roll" band right at the crease.
   const reach = -Math.min(...flapLocal.map(p => p.x), -half);
+  // Exposed so the release handler can decide "close the rest of the way
+  // or spring back" based on how much of the page is actually visibly
+  // folded over, not on the raw drag distance vs. the page's full
+  // diagonal — those disagree for anything but a perfectly straight,
+  // corner-to-corner drag, which is why the release threshold used to
+  // require dragging much further than "about half the page" to commit.
+  lastReach = reach;
   ctx.fillStyle = '#ffffff';
   fillBandLocal(0, -reach);
 
@@ -475,6 +503,18 @@ function render() {
   ctx.clearRect(0, 0, W, H);
   if (d >= Math.hypot(W, H) - 1) {
     ctx.drawImage(pageImg(currentIndex + anchorDir), 0, 0);
+  } else if (!dragging && d < 1 && hoverD > 0.5) {
+    // Anchored at the exact top corner, leaning at 45° back into the
+    // page — for THIS anchor/direction pair specifically, that keeps the
+    // fold line's pivot (F) just inside the page near the corner, so the
+    // reflected region only ever includes that one corner, giving a
+    // small clean nibble. (A shallower lean, or an anchor off the exact
+    // corner, pushes F outside the canvas and the "beyond the fold"
+    // region balloons to include most of the page — worth remembering
+    // before changing this.)
+    const hAnchor = { x: hoverDir === 1 ? W : 0, y: 0 };
+    const hN = { x: hoverDir * Math.SQRT1_2, y: -Math.SQRT1_2 };
+    renderCornerCurl(pageImg(currentIndex), pageImg(currentIndex + hoverDir), hoverD, hAnchor, hN);
   } else {
     renderCornerCurl(pageImg(currentIndex), pageImg(currentIndex + anchorDir), d, anchorPoint, curN);
   }
@@ -528,32 +568,48 @@ function resize() {
   render();
 }
 
+// A real page can only be grabbed at its outer edge — not picked up from
+// the middle of the sheet. Shared by drag-start and the hover hint below.
+function edgeZoneDir(x) {
+  const EDGE_ZONE = Math.max(50, W * 0.22);
+  if (x > W - EDGE_ZONE) return 1;
+  if (x < EDGE_ZONE) return -1;
+  return 0;
+}
+
 canvas.addEventListener('pointerdown', (e) => {
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left, y = e.clientY - rect.top;
-  // A real page can only be grabbed at its outer edge — not picked up
-  // from the middle of the sheet. Restrict drag-initiation to a margin
-  // along the left/right edges; clicks elsewhere on the page do nothing.
-  const EDGE_ZONE = Math.max(50, W * 0.22);
-  const nearRightEdge = x > W - EDGE_ZONE;
-  const nearLeftEdge = x < EDGE_ZONE;
-  if (!nearRightEdge && !nearLeftEdge) return;
-  const dir = nearRightEdge ? 1 : -1;
+  const dir = edgeZoneDir(x);
+  if (!dir) return;
   if (dir === 1 && currentIndex >= PAGES.length - 1) return;
   if (dir === -1 && currentIndex <= 0) return;
   cancelAnimationFrame(animId);
+  setHoverTarget(0, dir); // a real drag is starting — drop the hover hint
   // Anchor to wherever the reader actually grabbed the edge (this exact
   // y), not a corner — see the note above anchorPoint's declaration.
-  anchorPoint = { x: nearRightEdge ? W : 0, y };
+  anchorPoint = { x: dir === 1 ? W : 0, y };
   anchorDir = dir;
   curN = { x: dir, y: 0 };
   dragging = true;
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove', (e) => {
-  if (!dragging) return;
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  if (!dragging) {
+    // Not dragging (yet) — ease in a small "you can turn this page" curl
+    // hint when hovering near a turnable edge, same as Heyzine shows
+    // before you've even pressed down.
+    const dir = edgeZoneDir(x);
+    const canGo = dir === 1 ? currentIndex < PAGES.length - 1 : dir === -1 && currentIndex > 0;
+    // `half` here is the anchor-to-fold distance, not the hint's visible
+    // "leg" length along the page edges — for the 45°-corner geometry
+    // above, leg = half / Math.SQRT1_2 (i.e. half = leg * Math.SQRT1_2).
+    const legLen = Math.min(60, W * 0.14);
+    setHoverTarget(canGo ? legLen * Math.SQRT1_2 : 0, dir || hoverDir);
+    return;
+  }
   // n must point FROM the fold line TOWARD the anchor, i.e. from the
   // pointer back to the anchor point — not anchor-to-pointer (that
   // direction is backwards and sends the fold line's origin outside the
@@ -578,10 +634,16 @@ canvas.addEventListener('pointermove', (e) => {
 canvas.addEventListener('pointerup', () => {
   if (!dragging) return;
   dragging = false;
-  if (d > maxD() * 0.45) animateD(maxD(), 260, anchorDir);
+  // Commit once roughly half the page is visibly folded over — matching
+  // Heyzine's feel — rather than comparing raw drag distance to the
+  // page's full diagonal, which (even after the reach fix above) doesn't
+  // track how much of the page LOOKS turned for anything but a dead
+  // straight, corner-to-corner drag.
+  if (lastReach > W * 0.5) animateD(maxD(), 260, anchorDir);
   else animateD(0, 220, anchorDir);
 });
 canvas.addEventListener('pointerleave', () => {
+  setHoverTarget(0, hoverDir);
   if (!dragging) return;
   dragging = false;
   animateD(0, 220, anchorDir);

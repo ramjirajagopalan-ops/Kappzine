@@ -75,6 +75,24 @@ Artifact link shared in chat).
   the real page rectangle, so this doesn't reintroduce the earlier
   "swallows the whole page" bug.
 
+- Release/commit threshold now compares how much of the page is visibly
+  folded (`lastReach`, set on every render) against half the page width,
+  instead of comparing raw drag distance against the page's full
+  diagonal (fixed 2026-08-03, from a screen recording — releasing at a
+  visual ~50% fold was springing back instead of completing).
+- Cursor is a plain arrow (`cursor: default`) instead of the grab/grabbing
+  hand icon, matching Heyzine (fixed 2026-08-03).
+- Hovering near a turnable edge (without pressing down) now eases in a
+  small "you can turn this page" corner-curl hint, matching Heyzine
+  (added 2026-08-03). Implementation note: the hint is anchored at the
+  exact page corner with a 45° lean back into the page
+  (`n = {x: dir*SQRT1_2, y: -SQRT1_2}`) — this specific pairing keeps the
+  fold line's pivot just inside the page so the reflected "beyond the
+  fold" region stays a small corner nibble. A shallower lean, or an
+  anchor off the exact corner, pushes the pivot outside the canvas and
+  the reflected region balloons to include most of the page (hit this
+  exact bug once already — see git history if it needs touching again).
+
 ## Still open
 Nothing outstanding — engine confirmed matching Heyzine's behavior and
 feel as of 2026-08-03. Next step (deferred, needs explicit go-ahead): port
@@ -82,9 +100,6 @@ this into `FlipbookViewer.tsx`, replacing StPageFlip.
 - Double-page spread mode (cover → 2-page spread like a real open magazine,
   e.g. page 1 back = page 2, shown side-by-side with page 3) — requested by
   the user, more detail incoming before starting this.
-- Not yet ported into `FlipbookViewer.tsx` (production StPageFlip-based
-  viewer) — that's a separate, bigger integration touching double-page mode,
-  hotspots, zoom, and sound. Don't start until the demo's feel is confirmed.
 - Once debug colors are no longer needed, swap back in `magazinePage()` /
   `coverArt()` (already written in the file, currently unused) for realistic
   page content.
