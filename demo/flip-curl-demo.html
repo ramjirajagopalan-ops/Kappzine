@@ -332,7 +332,16 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
     return;
   }
 
-  const F = { x: anchor.x - dd * n.x, y: anchor.y - dd * n.y };
+  // A real mirror fold reflects the grabbed corner (anchor) exactly onto
+  // wherever it's been dragged to (a point `dd` away from anchor, along
+  // -n). The crease itself sits at the MIDPOINT of that reflection, not
+  // at the drag point — folding paper of length `half` back over an equal
+  // `half` of still-flat page beneath it. Using the full `dd` here (as an
+  // earlier version did) made the flap twice as long as it should be for
+  // any given drag, so it swallowed the whole page well before the drag
+  // was anywhere near complete.
+  const half = dd / 2;
+  const F = { x: anchor.x - half * n.x, y: anchor.y - half * n.y };
   const angle = Math.atan2(n.y, n.x);
   const perp = { x: -n.y, y: n.x };
   const BIG = 4000;
@@ -358,41 +367,56 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
   ctx.restore();
 
   // The folded flap itself (paper-back + shading), worked out in the
-  // fold's own local frame as before.
+  // fold's own local frame as before. The shading mimics a rolled sheet
+  // of paper, not a flat diagonal stripe: bright right at the crease
+  // (paper catching the light as it lifts), darkening as it curves away,
+  // then a thin bright rim right at the curled tip (the outer edge of a
+  // real rolled page always catches a sliver of light back), matching
+  // the "shine" a real page-turn shows and a flat gradient can't.
   ctx.save();
   ctx.translate(F.x, F.y);
   ctx.rotate(angle);
 
+  const hl = Math.min(22, half * 0.6);
+  const rim = Math.min(9, half * 0.25);
+  const darkEnd = Math.max(hl, half - rim);
+
   // Shadow the lifted flap casts onto the next page now showing through
   // beyond it — drawn first so the flap's own colour sits on top of it.
-  const gShadow = ctx.createLinearGradient(-dd - 50, 0, -dd, 0);
+  const gShadow = ctx.createLinearGradient(-half - 50, 0, -half, 0);
   gShadow.addColorStop(0, 'rgba(0,0,0,0)');
   gShadow.addColorStop(1, 'rgba(0,0,0,0.35)');
   ctx.fillStyle = gShadow;
-  fillBandLocal(-dd, -dd - 50);
+  fillBandLocal(-half, -half - 50);
 
   ctx.fillStyle = PAPER_BACK;
-  fillBandLocal(0, -dd);
+  fillBandLocal(0, -half);
 
-  const g1 = ctx.createLinearGradient(0, 0, -18, 0);
-  g1.addColorStop(0, 'rgba(255,255,255,0.45)');
+  const g1 = ctx.createLinearGradient(0, 0, -hl, 0);
+  g1.addColorStop(0, 'rgba(255,255,255,0.55)');
   g1.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g1;
-  fillBandLocal(0, -18);
+  fillBandLocal(0, -hl);
 
-  const g2 = ctx.createLinearGradient(-18, 0, -dd, 0);
+  const g2 = ctx.createLinearGradient(-hl, 0, -darkEnd, 0);
   g2.addColorStop(0, 'rgba(0,0,0,0)');
-  g2.addColorStop(0.6, 'rgba(0,0,0,0.28)');
-  g2.addColorStop(1, 'rgba(0,0,0,0.5)');
+  g2.addColorStop(1, 'rgba(0,0,0,0.55)');
   ctx.fillStyle = g2;
-  fillBandLocal(-18, -dd);
+  fillBandLocal(-hl, -darkEnd);
+
+  const g3 = ctx.createLinearGradient(-darkEnd, 0, -half, 0);
+  g3.addColorStop(0, 'rgba(0,0,0,0.55)');
+  g3.addColorStop(0.55, 'rgba(255,255,255,0.25)');
+  g3.addColorStop(1, 'rgba(255,255,255,0.05)');
+  ctx.fillStyle = g3;
+  fillBandLocal(-darkEnd, -half);
 
   // Cast shadow the flap drops onto the still-flat page next to the
   // crease itself (distinct from the "next page" shadow above).
-  const g3 = ctx.createLinearGradient(0, 0, 35, 0);
-  g3.addColorStop(0, 'rgba(0,0,0,0.32)');
-  g3.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = g3;
+  const g4 = ctx.createLinearGradient(0, 0, 35, 0);
+  g4.addColorStop(0, 'rgba(0,0,0,0.32)');
+  g4.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g4;
   fillBandLocal(35, 0);
 
   ctx.restore();
@@ -489,10 +513,18 @@ canvas.addEventListener('pointermove', (e) => {
   const vx = anchorPoint.x - x, vy = anchorPoint.y - y;
   const len = Math.hypot(vx, vy);
   d = Math.max(0, Math.min(maxD(), len));
-  // The fold direction tracks the pointer live: drag straight toward the
-  // spine and it stays a clean vertical fold; drag up or down while
-  // pulling and it leans, same as a real page.
-  if (len > 1) curN = { x: vx / len, y: vy / len };
+  // The fold direction tracks the pointer live and can lean with the
+  // vertical drag, same as a real page — but a real page is bound to its
+  // spine: it can lean, but it can never rotate past the spine or fold
+  // back on itself, or the paper would tear. Clamp the lean angle (measured
+  // from the straight pull-to-spine direction) to a hard maximum instead of
+  // letting the raw pointer vector point any which way.
+  if (len > 1) {
+    const MAX_LEAN = 75 * Math.PI / 180;
+    let ang = Math.atan2(vy, vx * anchorDir);
+    ang = Math.max(-MAX_LEAN, Math.min(MAX_LEAN, ang));
+    curN = { x: anchorDir * Math.cos(ang), y: Math.sin(ang) };
+  }
   render();
 });
 canvas.addEventListener('pointerup', () => {
