@@ -413,43 +413,33 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
   const cornersLocal = [toLocal(0, 0), toLocal(W, 0), toLocal(W, H), toLocal(0, H)];
   const flapLocal = clipHalfPlaneLX(cornersLocal).map(p => ({ x: -p.x, y: p.y }));
 
-  // Soft cast shadows onto the surfaces AROUND the flap — the still-flat
-  // page next to the crease, and the next page beyond the flap's tip.
-  // These are drawn before the flap's own clip is established (and
-  // blurred) so they aren't hard-cut to its silhouette, giving a soft,
-  // diffuse falloff instead of a sharp cutout. But they must still stay
-  // close to where the flap actually is: a plain fillBandLocal fills the
-  // ENTIRE length of the fold line, so for a leaning/tapered flap that
-  // only covers part of that line, the shadow bled along its whole length
-  // into parts of the page nowhere near any visible curl. Clip to the
-  // flap's own along-crease extent (with a little padding for the blur)
-  // before painting either shadow.
-  if (flapLocal.length >= 3) {
-    const flapYs = flapLocal.map(p => p.y);
-    const padY = 26;
-    const yLo = Math.min(...flapYs) - padY, yHi = Math.max(...flapYs) + padY;
-    ctx.save();
-    ctx.beginPath(); ctx.rect(-BIG, yLo, BIG * 2, yHi - yLo); ctx.clip();
-    ctx.filter = 'blur(9px)';
-    const gShadowCrease = ctx.createLinearGradient(0, 0, 42, 0);
-    gShadowCrease.addColorStop(0, 'rgba(0,0,0,0.34)');
-    gShadowCrease.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = gShadowCrease;
-    fillBandLocal(42, 0);
-
-    const gShadowTip = ctx.createLinearGradient(-half - 55, 0, -half, 0);
-    gShadowTip.addColorStop(0, 'rgba(0,0,0,0)');
-    gShadowTip.addColorStop(1, 'rgba(0,0,0,0.3)');
-    ctx.fillStyle = gShadowTip;
-    fillBandLocal(-half, -half - 55);
-    ctx.restore();
-  }
-
-  if (flapLocal.length >= 3) {
+  function tracePolygon() {
     ctx.beginPath();
     ctx.moveTo(flapLocal[0].x, flapLocal[0].y);
     for (let i = 1; i < flapLocal.length; i++) ctx.lineTo(flapLocal[i].x, flapLocal[i].y);
     ctx.closePath();
+  }
+
+  // Cast a shadow shaped exactly like the flap's own silhouette onto the
+  // page underneath, using the canvas's native shadow (which follows
+  // whatever is actually painted) instead of hand-computed shadow bands.
+  // A separately-computed band can drift out of alignment with the real,
+  // tapered polygon (which is exactly what kept happening — the shadow
+  // reading as disconnected from the curl); filling this SAME polygon
+  // with the shadow turned on makes that geometrically impossible: there
+  // is no second shape to get out of sync with the first.
+  if (flapLocal.length >= 3) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.45)';
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = '#000';
+    tracePolygon();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  if (flapLocal.length >= 3) {
+    tracePolygon();
     ctx.clip();
   }
 
@@ -460,7 +450,16 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
   // sheet of paper: bright at the crease, rolling through a mid shadow,
   // darkest just before the curl's underside, then a bright rim right at
   // the tip where the curled edge catches the light again.
-  const paper = ctx.createLinearGradient(0, 0, -half, 0);
+  //
+  // Important: the gradient/fill must reach as far as flapLocal's OWN
+  // extent, not `half` — flapLocal is the reflection of the page
+  // rectangle's corners, which generally lands at a different distance
+  // from F than the anchor-to-fold distance `half` does. Filling only to
+  // `-half` left part of the polygon (wherever it reaches further than
+  // that) uncovered, exposing the opaque shadow-cast fill underneath as
+  // a stray solid black wedge.
+  const reach = -Math.min(...flapLocal.map(p => p.x), -half);
+  const paper = ctx.createLinearGradient(0, 0, -reach, 0);
   paper.addColorStop(0, '#ffffff');
   paper.addColorStop(0.1, '#f2efe8');
   paper.addColorStop(0.5, '#c7c2b4');
@@ -468,7 +467,7 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
   paper.addColorStop(0.92, '#efece3');
   paper.addColorStop(1, '#ffffff');
   ctx.fillStyle = paper;
-  fillBandLocal(0, -half);
+  fillBandLocal(0, -reach);
 
   ctx.restore();
   ctx.restore();

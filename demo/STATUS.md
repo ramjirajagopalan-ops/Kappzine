@@ -37,12 +37,18 @@ Artifact link shared in chat).
   cutout instead of Heyzine's soft, diffuse falloff). This also fixed a
   bug from the taper change where the crease-side shadow was being clipped
   away almost entirely.
-- Shadow no longer bleeds along the full length of the fold line for a
-  tapered/leaning flap (fixed 2026-08-03 — spotted as a shadow visibly
-  disconnected from the curl, trailing on well past where the visible
-  paper actually ends). The shadow fills are now bounded to the flap's own
-  along-crease extent (plus a small blur margin), not the flap's full
-  theoretical line length.
+- Shadow is now cast by filling the flap's own polygon path with the
+  canvas's native shadowColor/shadowBlur, instead of hand-computed shadow
+  bands (fixed 2026-08-03, second pass — the first attempt bounded the
+  bands to the flap's Y-extent but they could still drift out of
+  alignment with the real tapered shape; filling the SAME polygon that's
+  used for the flap itself makes misalignment geometrically impossible).
+  This also surfaced and fixed a related bug: the paper gradient fill only
+  covered `0` to `-half`, but flapLocal's real extent (derived from the
+  page rectangle's corners) isn't bounded by `half` — so part of the
+  polygon could go unpainted by the paper fill and expose the opaque
+  shadow-casting fill underneath as a stray solid black wedge. The paper
+  fill now reaches flapLocal's actual extent.
 - Debug-colored pages (`DEBUG_COLORS` in the file) so it's obvious at a glance
   whether the right page is showing through.
 - White background.
