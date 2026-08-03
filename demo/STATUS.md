@@ -53,9 +53,17 @@ Artifact link shared in chat).
   whether the right page is showing through.
 - White background.
 
+- Curl paper is flat solid white (`#ffffff`), no internal gradient (fixed
+  2026-08-03 — confirmed against Heyzine that its paper has no gradient at
+  all; our multi-stop gradient was also the cause of a stray bright wedge
+  artifact near the tip vertex, gone now that there's no gradient to pool
+  oddly there). All the roundness/depth now comes from the cast shadow
+  alone. User confirmed the shadow + geometry are ~99% matching Heyzine at
+  this point.
+
 ## Still open
-- Shadow/curl look — much closer to the Heyzine reference now but not yet
-  pixel-matched; keep comparing against reference screenshots.
+- One more geometric issue flagged by the user, not yet described in
+  detail — waiting on their next message before touching geometry again.
 - Double-page spread mode (cover → 2-page spread like a real open magazine,
   e.g. page 1 back = page 2, shown side-by-side with page 3) — requested by
   the user, more detail incoming before starting this.

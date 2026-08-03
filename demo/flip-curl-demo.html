@@ -443,30 +443,14 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
     ctx.clip();
   }
 
-  // A single, continuous gradient across the whole flap (crease to tip)
-  // instead of several overlapping semi-transparent rectangles — that
-  // earlier approach left visible seams where one band's fade-to-zero
-  // met the next band's start. One gradient reads as one smoothly rolled
-  // sheet of paper: bright at the crease, rolling through a mid shadow,
-  // darkest just before the curl's underside, then a bright rim right at
-  // the tip where the curled edge catches the light again.
-  //
-  // Important: the gradient/fill must reach as far as flapLocal's OWN
-  // extent, not `half` — flapLocal is the reflection of the page
-  // rectangle's corners, which generally lands at a different distance
-  // from F than the anchor-to-fold distance `half` does. Filling only to
-  // `-half` left part of the polygon (wherever it reaches further than
-  // that) uncovered, exposing the opaque shadow-cast fill underneath as
-  // a stray solid black wedge.
+  // Heyzine's own paper has no gradient at all on it — flat, even white.
+  // All the roundness/depth reads from the cast shadow alone (drawn
+  // above, shaped exactly like this same polygon). A gradient here was
+  // also what produced a stray bright wedge near the tip vertex, where a
+  // linear gradient's late colour stops pool oddly close to a sharp
+  // point. Plain white sidesteps both problems at once.
+  ctx.fillStyle = '#ffffff';
   const reach = -Math.min(...flapLocal.map(p => p.x), -half);
-  const paper = ctx.createLinearGradient(0, 0, -reach, 0);
-  paper.addColorStop(0, '#ffffff');
-  paper.addColorStop(0.1, '#f2efe8');
-  paper.addColorStop(0.5, '#c7c2b4');
-  paper.addColorStop(0.78, '#8d8779');
-  paper.addColorStop(0.92, '#efece3');
-  paper.addColorStop(1, '#ffffff');
-  ctx.fillStyle = paper;
   fillBandLocal(0, -reach);
 
   ctx.restore();
