@@ -30,10 +30,39 @@ against Heyzine frame-by-frame — that's the next step, pending user review):
   "cover always centered" requirement called out for the custom engine.
   Whether this is fixable via config/CSS (vs. requiring a fork) is unverified.
 
-Decision pending: user is reviewing this demo before deciding whether to keep
-tuning the custom canvas engine, switch to configuring/skinning StPageFlip to
-match Heyzine, or some hybrid. Do not assume either direction — ask/check
-before continuing further curl work in either file.
+**Update — concrete finding (2026-08-03, same day):** user reported the
+cover-opening transition "looks like a slide" in the first version of this
+demo. Investigated by dragging the cover open with `showCover: true`
+frame-by-frame: confirmed — the cover doesn't curl at all, it SCALES DOWN
+to a thin vertical sliver then reveals the next page, a flat squash, not a
+paper fold. This is StPageFlip deliberately treating `showCover` pages as
+rigid "hard" covers (a physically reasonable choice for an actual
+hardcover, but not what a *soft* magazine cover/page should do).
+
+Added a live hard/soft-cover toggle button (`HC`) to the demo and tested
+`showCover: false` (soft cover) directly: the fold itself is then genuinely
+excellent — real tapered diagonal peel with a proper highlight/shadow
+gradient, arguably nicer than our own canvas engine's flap shading. BUT
+with soft cover, page 0 is never shown alone at all — it's immediately
+paired with page 1 as a two-page spread from the very first frame, so
+there's no "cover centered by itself" moment to begin with.
+
+**Net conclusion: StPageFlip has the SAME cover-vs-spread tension we've
+spent 12 rounds on with the custom engine — it just splits it into two
+mutually exclusive settings** (hard cover = centered-ish but flat/no-curl;
+soft cover = beautiful curl but no standalone cover) rather than solving
+both at once. It does not appear to be a clear win over the custom engine
+as-is. (Also fixed a real bug hit while testing: `pageFlip.destroy()`
+removes its own container DOM node, not just its children — same thing
+`FlipbookViewer.tsx` already works around — so toggling settings needs to
+recreate the host div each time, not just clear it.)
+
+Decision pending: user is reviewing both toggle states in the live demo
+before deciding whether to keep tuning the custom canvas engine (which
+already has a good interior-page curl — the remaining gap is specifically
+the cover<->spread transition), pursue a hybrid, or something else. Do not
+assume either direction — ask/check before continuing further curl work in
+either file.
 
 ## Working (verified against Heyzine reference video/screenshots)
 - Fold leans with vertical drag like a real page, but is clamped to a max

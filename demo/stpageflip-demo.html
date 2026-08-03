@@ -42,7 +42,8 @@
   .corner-nav:hover { border-color: var(--accent); color: var(--accent); }
   .corner-nav:disabled { opacity: .3; cursor: default; border-color: var(--line); color: var(--ink); }
   .corner-nav.prev { left: 2px; } .corner-nav.next { right: 2px; }
-  .toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; padding: 2px 6px 14px; flex: 0 0 auto; }
+  .toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; padding: 2px 6px 14px; flex: 0 0 auto; position: relative; z-index: 10; background: var(--bg); }
+  header, .subhead { position: relative; z-index: 10; background: var(--bg); }
   .btn { appearance: none; border: 1px solid var(--line); background: transparent; color: var(--muted); font: inherit; display: flex; align-items: center; justify-content: center; height: 34px; width: 34px; border-radius: 999px; cursor: pointer; transition: background .14s, color .14s, border-color .14s; }
   .btn:hover { color: var(--ink); border-color: var(--accent); }
   .btn.active { background: var(--accent); color: #17140f; border-color: var(--accent); }
@@ -81,6 +82,8 @@
       <button class="btn" id="mode1Btn" title="Single page">1</button>
       <button class="btn" id="mode2Btn" title="Double page">2</button>
       <button class="btn active" id="modeAutoBtn" title="Auto layout">A</button>
+      <div class="divider"></div>
+      <button class="btn active" id="hardCoverBtn" title="Hard cover (showCover: true) — click to toggle soft cover">HC</button>
       <div class="divider"></div>
       <button class="btn" id="fullscreenBtn" title="Fullscreen">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
@@ -129,7 +132,7 @@ const PAGE_COUNT = 6;
 const pageUrls = [];
 for (let i = 0; i < PAGE_COUNT; i++) pageUrls.push(debugPageDataUrl(PAGE_W, PAGE_H, i, `PAGE ${i}`));
 
-const bookHost = document.getElementById('bookHost');
+let bookHost = document.getElementById('bookHost');
 const stageWrapper = document.getElementById('stageWrapper');
 const pageIndicator = document.getElementById('pageIndicator');
 const prevBtn = document.getElementById('prevBtn');
@@ -138,6 +141,7 @@ const mainArea = document.getElementById('mainArea');
 
 let pageFlip = null;
 let mode = 'auto'; // 'single' | 'double' | 'auto'
+let hardCover = true; // StPageFlip's showCover option
 let ready = false;
 
 function buildPageEls() {
@@ -159,7 +163,15 @@ function buildPageEls() {
 function buildFlip() {
   if (pageFlip) {
     try { pageFlip.destroy(); } catch (e) { /* no-op */ }
-    bookHost.innerHTML = '';
+    // destroy() removes the container node itself from the DOM (not just
+    // its children) — same thing FlipbookViewer.tsx's own code already
+    // works around. Without recreating it, every rebuild after the first
+    // (e.g. toggling a mode button) fails with bookHost no longer in the
+    // document.
+    if (bookHost.parentNode) bookHost.parentNode.removeChild(bookHost);
+    bookHost = document.createElement('div');
+    bookHost.id = 'bookHost';
+    stageWrapper.insertBefore(bookHost, nextBtn);
   }
   const pageAspect = PAGE_W / PAGE_H;
   const minWidth = mode === 'single' ? 340 : mode === 'auto' ? 380 : 220;
@@ -173,7 +185,7 @@ function buildFlip() {
     size: 'stretch',
     autoSize: true,
     minWidth, maxWidth, minHeight, maxHeight,
-    showCover: true,
+    showCover: hardCover,
     usePortrait: mode !== 'double',
     maxShadowOpacity: 0.6,
     flippingTime: 700,
@@ -220,6 +232,18 @@ function setMode(m) {
 mode1Btn.addEventListener('click', () => setMode('single'));
 mode2Btn.addEventListener('click', () => setMode('double'));
 modeAutoBtn.addEventListener('click', () => setMode('auto'));
+
+const hardCoverBtn = document.getElementById('hardCoverBtn');
+hardCoverBtn.addEventListener('click', () => {
+  hardCover = !hardCover;
+  hardCoverBtn.classList.toggle('active', hardCover);
+  hardCoverBtn.title = hardCover
+    ? 'Hard cover (showCover: true) — click to toggle soft cover'
+    : 'Soft cover (showCover: false) — click to toggle hard cover';
+  const startPage = pageFlip ? pageFlip.getCurrentPageIndex() : 0;
+  buildFlip();
+  if (pageFlip && startPage) pageFlip.turnToPage(startPage);
+});
 
 const fullscreenBtn = document.getElementById('fullscreenBtn');
 fullscreenBtn.addEventListener('click', () => {
