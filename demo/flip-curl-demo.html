@@ -314,6 +314,29 @@ function fillBandLocal(hi, lo = 0) {
   ctx.fillRect(Math.min(lo, hi), -BIG, Math.abs(hi - lo), BIG * 2);
 }
 
+// Sutherland-Hodgman clip of a polygon (array of {x,y}) against the
+// half-plane x >= 0. Used to find the real, page-bounded shape of the
+// flap instead of assuming it always spans the full canvas height.
+function clipHalfPlaneLX(poly) {
+  const out = [];
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    const cur = poly[i], prev = poly[(i - 1 + n) % n];
+    const curIn = cur.x >= 0, prevIn = prev.x >= 0;
+    if (curIn) {
+      if (!prevIn) {
+        const t = prev.x / (prev.x - cur.x);
+        out.push({ x: 0, y: prev.y + t * (cur.y - prev.y) });
+      }
+      out.push(cur);
+    } else if (prevIn) {
+      const t = prev.x / (prev.x - cur.x);
+      out.push({ x: 0, y: prev.y + t * (cur.y - prev.y) });
+    }
+  }
+  return out;
+}
+
 // Renders a full-height page fold as a flat mirror-fold — the reflected
 // edge lands exactly at the drag point, direction tracks the pointer
 // live, and the flap always spans the complete page height. The
@@ -376,6 +399,28 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
   ctx.save();
   ctx.translate(F.x, F.y);
   ctx.rotate(angle);
+
+  // The flap's real shape is the reflection of whatever part of the page
+  // rectangle actually lies beyond the fold line — NOT a band that spans
+  // the full canvas height regardless of angle. For a straight-across
+  // pull those are the same thing (the fold line is vertical, so the
+  // beyond-fold region already spans full height); but once the fold
+  // leans, the beyond-fold region is a smaller, tapered slice of the page
+  // near the anchor corner, and reflecting THAT is what gives a narrow,
+  // believable curl instead of a flat parallelogram eating half the page.
+  const toLocal = (px, py) => {
+    const dx = px - F.x, dy = py - F.y;
+    return { x: dx * n.x + dy * n.y, y: dx * perp.x + dy * perp.y };
+  };
+  const cornersLocal = [toLocal(0, 0), toLocal(W, 0), toLocal(W, H), toLocal(0, H)];
+  const flapLocal = clipHalfPlaneLX(cornersLocal).map(p => ({ x: -p.x, y: p.y }));
+  if (flapLocal.length >= 3) {
+    ctx.beginPath();
+    ctx.moveTo(flapLocal[0].x, flapLocal[0].y);
+    for (let i = 1; i < flapLocal.length; i++) ctx.lineTo(flapLocal[i].x, flapLocal[i].y);
+    ctx.closePath();
+    ctx.clip();
+  }
 
   const hl = Math.min(22, half * 0.6);
   const rim = Math.min(9, half * 0.25);

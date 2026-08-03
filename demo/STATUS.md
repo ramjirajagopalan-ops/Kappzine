@@ -9,7 +9,15 @@ Artifact link shared in chat).
   ~75° lean off the pull-to-spine direction so it can't rotate past the
   spine or invert (fixed 2026-08-03 — "turn only from the right and till
   the middle binding").
-- Full-height fold band — spans the whole page, no triangular corner taper.
+- Full-height fold band for straight-across drags; naturally tapers to a
+  narrow corner peel for small/leaning drags instead of always forcing full
+  height (fixed 2026-08-03 — the flap's shading was filling the full canvas
+  height regardless of lean angle, which made a leaning drag balloon into a
+  flat parallelogram eating half the page instead of a believable tapered
+  curl. Now the flap is the true reflection of whatever part of the page
+  rectangle lies beyond the fold line, computed via half-plane polygon clip
+  in the fold's local frame — this taper naturally disappears and reaches
+  full height on its own once a drag is close to straight-across).
 - Edge-only drag initiation — grabbing the middle of the page does nothing.
 - Next page reveals progressively during the drag (fixed 2026-08-02: the
   "still flat" clip region was on the wrong side of the fold line, covering
