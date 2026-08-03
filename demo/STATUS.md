@@ -4,6 +4,37 @@ Standalone canvas page-turn engine, not yet wired into `src/components/viewer/Fl
 Open `flip-curl-demo.html` directly in a browser to try it (or see the live copy on the
 Artifact link shared in chat).
 
+## Alternative under evaluation: StPageFlip (2026-08-03)
+
+After 12 rounds tuning the custom canvas engine's cover<->spread transition
+without a confirmed match to Heyzine, and given the user's stated priority
+(freeze the curl fast, then move to dashboard/feature work), built
+`stpageflip-demo.html` — the SAME 6-page mock book rendered with `page-flip`
+(StPageFlip), the open-source, self-hosted library **already used** in
+production `FlipbookViewer.tsx` (same config: stretch sizing, 700ms flip,
+0.6 max shadow opacity, showCover). Explicitly NOT Heyzine's own API — no
+vendor lock-in, no upload dependency on a third party.
+
+Notable, honest differences observed vs. the custom engine (not yet compared
+against Heyzine frame-by-frame — that's the next step, pending user review):
+- Real CSS 3D perspective transforms (the page visibly foreshortens/skews in
+  3D), not a flat mirror-reflection — a different *style* of fold than our
+  hand-rolled geometry, worth comparing directly against Heyzine's own look.
+  See `stpf_drag_055.png` in the session's scratchpad for a mid-drag capture.
+  Interior spread-to-spread and the cover flip both work via drag and via
+  the 1/2/A mode buttons out of the box, no custom rectOpts/lean math needed.
+  Also worth noting: the demo's own `dependencies` list currently pins
+  `page-flip@2.0.7` in `package.json` — same version bundled here.
+- The cover renders RIGHT-aligned within its stage at rest by default
+  (`showCover:true` + stretch sizing), not centered — unlike the explicit
+  "cover always centered" requirement called out for the custom engine.
+  Whether this is fixable via config/CSS (vs. requiring a fork) is unverified.
+
+Decision pending: user is reviewing this demo before deciding whether to keep
+tuning the custom canvas engine, switch to configuring/skinning StPageFlip to
+match Heyzine, or some hybrid. Do not assume either direction — ask/check
+before continuing further curl work in either file.
+
 ## Working (verified against Heyzine reference video/screenshots)
 - Fold leans with vertical drag like a real page, but is clamped to a max
   ~75° lean off the pull-to-spine direction so it can't rotate past the
