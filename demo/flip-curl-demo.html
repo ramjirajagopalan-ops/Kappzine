@@ -629,7 +629,31 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n, rectOpts) {
     const xs = flapLocal.map(p => p.x), ys = flapLocal.map(p => p.y);
     const bx0 = Math.min(...xs), bx1 = Math.max(...xs);
     const by0 = Math.min(...ys), by1 = Math.max(...ys);
-    if (bx1 > bx0 && by1 > by0) ctx.drawImage(flapTexture, bx0, by0, bx1 - bx0, by1 - by0);
+    if (bx1 > bx0 && by1 > by0) {
+      const bw = bx1 - bx0, bh = by1 - by0;
+      // This whole frame is rotated by `angle`, which sits near 180° for
+      // a backward (left-edge) drag — n.x is negative there (curN's
+      // baseline is {-1,0}, not {1,0}) — so drawing the texture straight
+      // into this frame (an earlier version did) rendered the page's
+      // own content upside-down whenever the drag direction was
+      // backward. Mirroring it 180° about the bounding box's own center
+      // — in place, at the exact same destination rectangle the white-
+      // fill branch below also uses — cancels that out for absolute
+      // on-screen orientation without changing which pixels get drawn
+      // where, so it can't reintroduce a clip/coverage mismatch the way
+      // rotating the whole draw frame differently from the already-
+      // established polygon clip would.
+      if (n.x < 0) {
+        const cx = (bx0 + bx1) / 2, cy = (by0 + by1) / 2;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(-1, -1);
+        ctx.drawImage(flapTexture, -bw / 2, -bh / 2, bw, bh);
+        ctx.restore();
+      } else {
+        ctx.drawImage(flapTexture, bx0, by0, bw, bh);
+      }
+    }
 
     const bandW = Math.min(46, reach * 0.5);
     const roll = ctx.createLinearGradient(0, 0, -bandW, 0);
@@ -729,7 +753,16 @@ function renderSpread() {
 
   const closeD = fullCloseDRect(anchorPoint, curN, rect.x0, rect.y0, rect.x1, rect.y1);
   if (d >= closeD - 1) {
-    ctx.drawImage(pageImg(flapIdx), rect.imgOffX, 0, halfW, H);
+    // Once fully closed, the flap has rotated all the way onto the
+    // OPPOSITE side from where it started — not its own original slot.
+    // Drawing it at rect.imgOffX (an earlier version did) left the
+    // static side frozen on its old page for the entire drag and then
+    // popped straight to the new content in a single frame right at
+    // release, instead of the flap visibly arriving there — exactly the
+    // "suddenly 3 and 4 appear, not smooth" jump the user's own
+    // side-by-side recording caught.
+    const restX = dir === 1 ? 0 : halfW;
+    ctx.drawImage(pageImg(flapIdx), restX, 0, halfW, H);
   } else {
     renderCornerCurl(foldingImg, null, d, anchorPoint, curN, {
       x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1,

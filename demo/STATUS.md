@@ -309,6 +309,41 @@ Artifact link shared in chat).
     single-page regression suite, the spread navigation/boundary tests,
     and the responsive mode-toggle tests were all re-run and still pass.
 
+- **Fixed the "sudden pop" on spread completion, and an upside-down flap
+  bug (2026-08-03, tenth pass).** Sizing and lean were confirmed good,
+  but user feedback on a fresh Kappzine-only recording
+  (`66a633ba-Recording_20260803_182155.mp4`) called out that "we are
+  flipping the page, and suddenly 3 and 4 appear, not smooth" — expecting
+  the outgoing page to visibly slide/fold away rather than jump.
+  Root cause, found by extracting frames around the exact commit moment:
+  `renderSpread`'s "fully closed" shortcut drew the flap's texture at
+  `rect.imgOffX` — the FOLDING page's own original slot (e.g. halfW for
+  a forward flip) — instead of the slot it actually rotates onto once
+  closed (the opposite, static side, x=0 for forward). That meant the
+  static side sat frozen on its old page for the entire drag and then
+  popped straight to the new page in a single frame right at release,
+  while the mid-drag frames (correctly) showed the flap already
+  sweeping toward that same opposite side — the shortcut's landing spot
+  simply didn't match where the animation had been heading. Fixed by
+  drawing the closed flap at `dir === 1 ? 0 : halfW` instead. Verified
+  frame-by-frame with a slow scripted drag + release: the flap now
+  visibly grows to cover the opposite page and the release animation
+  lands exactly where the drag was already pointing, no jump.
+  - Caught a second bug while re-checking backward flips specifically:
+    the flap's text/artwork rendered upside-down whenever dragging from
+    the left edge (`anchorDir=-1`), because the local drawing frame is
+    rotated by an angle near 180° for that direction (curN's baseline is
+    `{-1,0}`), and the flap texture was drawn straight into that rotated
+    frame. Fixed by mirroring the image in place (`scale(-1,-1)` about
+    the flap's own bounding-box center) whenever `n.x < 0`, rather than
+    un-rotating the whole frame — mirroring at the same destination
+    rectangle can't reintroduce a clip-coverage mismatch the way
+    rotating differently from the already-established polygon clip
+    could (confirmed: an earlier attempt at the un-rotate approach left
+    a small black sliver at the flap's tip; the in-place mirror doesn't).
+  - Re-ran the entire regression suite (single-page + all spread tests)
+    afterward — everything still passes.
+
 ## Still open
 - Port the finalized engine (single + double-page spread) into
   `FlipbookViewer.tsx`, replacing StPageFlip — deferred, needs explicit
