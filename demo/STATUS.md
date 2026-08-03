@@ -192,6 +192,21 @@ Artifact link shared in chat).
     produces a fold angle that starts at 45° and narrows to 17° as it
     grows, matching the measured Heyzine pattern.
 
+- Commit threshold lowered to 40% of page width (was 50%), per explicit
+  request after confirming the 50% version worked correctly.
+- Fold lean removed entirely (2026-08-03, sixth pass) — after two more
+  rounds of tuning the lean-angle clamp (fixed 75°/28°, then a clamp that
+  itself narrowed 55°→17° as the drag progressed) still read as "the
+  wrong direction," the explicit final ask was for the fold to stay
+  straight "however we drag." `curN` is now always exactly
+  `{x: anchorDir, y: 0}` — full page height, no lean — and reach (`d`) is
+  now driven only by the horizontal component of the drag (`vx`), not
+  the full 2D pointer distance, so vertical mouse movement no longer
+  affects the fold's reach either, not just its angle. Verified: a
+  pure-horizontal drag, a steep up-diagonal, and a steep down-diagonal of
+  the same horizontal distance now all produce pixel-identical reach;
+  vertical-only movement (zero horizontal) produces no curl at all.
+
 ## Still open
 Nothing outstanding — engine confirmed matching Heyzine's behavior and
 feel as of 2026-08-03. Next step (deferred, needs explicit go-ahead): port

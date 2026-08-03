@@ -682,36 +682,23 @@ canvas.addEventListener('pointermove', (e) => {
   // before any real movement — measuring from dragStart makes that gap
   // exactly zero at the moment of the click, growing only with genuine
   // subsequent movement, still 1:1.
-  const vx = dragStart.x - x, vy = dragStart.y - y;
-  const len = Math.hypot(vx, vy);
+  // The fold stays straight (n always horizontal, full page height) and
+  // its reach is driven only by the HORIZONTAL distance dragged —
+  // however you drag, the page turns the same way a real sheet held at
+  // its edge would, rather than tilting (or even just reaching further)
+  // because the pointer wandered vertically. Several rounds of leaning
+  // this by the drag angle (first a fixed clamp, then a clamp that
+  // itself narrowed as the drag progressed) still read as "the wrong
+  // direction"; removing the lean entirely, and keying reach off vx
+  // alone, is the direct fix.
+  const vx = (dragStart.x - x) * anchorDir;
   // A small dead zone on top of the dragStart fix above, purely to
   // absorb genuine hand tremor on the press itself (a few px) so the
   // very first rendered frame of a real drag reads as perfectly flat,
   // not just "very nearly" flat.
   const JITTER_DEAD_ZONE = 6;
-  d = Math.max(0, Math.min(maxD(), len - JITTER_DEAD_ZONE));
-  // The fold direction tracks the pointer live and can lean with the
-  // vertical drag, like a real page does — but comparing frame-by-frame
-  // against Heyzine's own reference recording shows the ALLOWED lean
-  // isn't a fixed angle throughout a drag: right at a corner grab, small
-  // drags can lean quite steeply (measured close to 45° in their
-  // reference, matching a natural dog-ear peel), but the crease
-  // consistently straightens back toward vertical as the same drag
-  // continues — by the time it's roughly halfway to closing, Heyzine's
-  // own crease sits within ~15-20° of vertical even when the drag itself
-  // is far from straight. A single fixed clamp can't reproduce that: it
-  // either keeps early small peels too straight (already tried at 75°
-  // and 28°, both read as "wrong direction" since the same angle carried
-  // all the way through) or lets a big, mostly-complete turn stay too
-  // diagonal. Shrinking the clamp itself as the drag progresses toward
-  // its own closure distance reproduces both ends of that behaviour.
-  if (len > 1) {
-    const progress = Math.min(1, d / (W * 0.5));
-    const MAX_LEAN = (55 - 38 * progress) * Math.PI / 180;
-    let ang = Math.atan2(vy, vx * anchorDir);
-    ang = Math.max(-MAX_LEAN, Math.min(MAX_LEAN, ang));
-    curN = { x: anchorDir * Math.cos(ang), y: Math.sin(ang) };
-  }
+  d = Math.max(0, Math.min(maxD(), vx - JITTER_DEAD_ZONE));
+  curN = { x: anchorDir, y: 0 };
   render();
 });
 canvas.addEventListener('pointerup', () => {
