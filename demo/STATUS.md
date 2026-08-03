@@ -27,9 +27,16 @@ Artifact link shared in chat).
   between the grabbed corner and where it's dragged to; using the full
   distance made the flap balloon to double size and swallow the whole page
   well before the drag was anywhere near complete).
-- Richer curl shading: bright highlight at the crease, darkening through the
-  curve, thin bright rim at the curled tip (mimics a rolled sheet of paper
-  catching light at its edge, not a flat diagonal gradient band).
+- Curl shading is one continuous gradient (white crease → mid grey-tan
+  shadow → bright tip rim), not several overlapping semi-transparent
+  rectangles — that approach left visible hard seams between bands (fixed
+  2026-08-03, side-by-side against a Heyzine screenshot). Cast shadows onto
+  the surfaces around the flap are now soft/blurred and drawn before the
+  flap's own clip is applied, instead of being hard-cut to the flap's
+  tapered silhouette (which is what made our shadow look like a sharp
+  cutout instead of Heyzine's soft, diffuse falloff). This also fixed a
+  bug from the taper change where the crease-side shadow was being clipped
+  away almost entirely.
 - Debug-colored pages (`DEBUG_COLORS` in the file) so it's obvious at a glance
   whether the right page is showing through.
 - White background.

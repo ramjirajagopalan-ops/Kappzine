@@ -96,8 +96,6 @@
 // bending the geometry itself.
 // ============================================================
 
-const PAPER_BACK = '#e9dfc8';
-
 function magazinePage(w, h, kicker, headline, accent, photoHue, pageNo) {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
@@ -400,6 +398,28 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
   ctx.translate(F.x, F.y);
   ctx.rotate(angle);
 
+  // Soft cast shadows onto the surfaces AROUND the flap — the still-flat
+  // page next to the crease, and the next page beyond the flap's tip.
+  // These belong to the surface being shadowed, not to the flap's own
+  // silhouette, so they're drawn before the flap's clip is established
+  // (and blurred) rather than hard-clipped to its tapered shape, which
+  // is what made our shadow look like a sharp cutout instead of the soft,
+  // diffuse falloff a real cast shadow has.
+  ctx.save();
+  ctx.filter = 'blur(9px)';
+  const gShadowCrease = ctx.createLinearGradient(0, 0, 42, 0);
+  gShadowCrease.addColorStop(0, 'rgba(0,0,0,0.34)');
+  gShadowCrease.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = gShadowCrease;
+  fillBandLocal(42, 0);
+
+  const gShadowTip = ctx.createLinearGradient(-half - 55, 0, -half, 0);
+  gShadowTip.addColorStop(0, 'rgba(0,0,0,0)');
+  gShadowTip.addColorStop(1, 'rgba(0,0,0,0.3)');
+  ctx.fillStyle = gShadowTip;
+  fillBandLocal(-half, -half - 55);
+  ctx.restore();
+
   // The flap's real shape is the reflection of whatever part of the page
   // rectangle actually lies beyond the fold line — NOT a band that spans
   // the full canvas height regardless of angle. For a straight-across
@@ -422,47 +442,22 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
     ctx.clip();
   }
 
-  const hl = Math.min(22, half * 0.6);
-  const rim = Math.min(9, half * 0.25);
-  const darkEnd = Math.max(hl, half - rim);
-
-  // Shadow the lifted flap casts onto the next page now showing through
-  // beyond it — drawn first so the flap's own colour sits on top of it.
-  const gShadow = ctx.createLinearGradient(-half - 50, 0, -half, 0);
-  gShadow.addColorStop(0, 'rgba(0,0,0,0)');
-  gShadow.addColorStop(1, 'rgba(0,0,0,0.35)');
-  ctx.fillStyle = gShadow;
-  fillBandLocal(-half, -half - 50);
-
-  ctx.fillStyle = PAPER_BACK;
+  // A single, continuous gradient across the whole flap (crease to tip)
+  // instead of several overlapping semi-transparent rectangles — that
+  // earlier approach left visible seams where one band's fade-to-zero
+  // met the next band's start. One gradient reads as one smoothly rolled
+  // sheet of paper: bright at the crease, rolling through a mid shadow,
+  // darkest just before the curl's underside, then a bright rim right at
+  // the tip where the curled edge catches the light again.
+  const paper = ctx.createLinearGradient(0, 0, -half, 0);
+  paper.addColorStop(0, '#ffffff');
+  paper.addColorStop(0.1, '#f2efe8');
+  paper.addColorStop(0.5, '#c7c2b4');
+  paper.addColorStop(0.78, '#8d8779');
+  paper.addColorStop(0.92, '#efece3');
+  paper.addColorStop(1, '#ffffff');
+  ctx.fillStyle = paper;
   fillBandLocal(0, -half);
-
-  const g1 = ctx.createLinearGradient(0, 0, -hl, 0);
-  g1.addColorStop(0, 'rgba(255,255,255,0.55)');
-  g1.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g1;
-  fillBandLocal(0, -hl);
-
-  const g2 = ctx.createLinearGradient(-hl, 0, -darkEnd, 0);
-  g2.addColorStop(0, 'rgba(0,0,0,0)');
-  g2.addColorStop(1, 'rgba(0,0,0,0.55)');
-  ctx.fillStyle = g2;
-  fillBandLocal(-hl, -darkEnd);
-
-  const g3 = ctx.createLinearGradient(-darkEnd, 0, -half, 0);
-  g3.addColorStop(0, 'rgba(0,0,0,0.55)');
-  g3.addColorStop(0.55, 'rgba(255,255,255,0.25)');
-  g3.addColorStop(1, 'rgba(255,255,255,0.05)');
-  ctx.fillStyle = g3;
-  fillBandLocal(-darkEnd, -half);
-
-  // Cast shadow the flap drops onto the still-flat page next to the
-  // crease itself (distinct from the "next page" shadow above).
-  const g4 = ctx.createLinearGradient(0, 0, 35, 0);
-  g4.addColorStop(0, 'rgba(0,0,0,0.32)');
-  g4.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = g4;
-  fillBandLocal(35, 0);
 
   ctx.restore();
   ctx.restore();
