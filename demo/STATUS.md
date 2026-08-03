@@ -164,6 +164,34 @@ Artifact link shared in chat).
     scale from the same anchor/lean, so it can't be thrown off the same
     way.
 
+- Commit-on-release threshold and the fold's lean angle both fixed again
+  (2026-08-03, fifth pass) after a video showed a deliberate ~half-page
+  drag still springing back, and the lean still reading as "same as
+  before" despite the 28° clamp from the previous pass:
+  - Commit threshold: `d > fullCloseD(anchor,n) * 0.5` (the previous
+    pass's fix) turned out to have the same class of bug as the
+    `lastReach`-based version it replaced — a fold LINE's angle alone can
+    split the page very unevenly independent of actual drag distance
+    near a corner, so `fullCloseD` for a corner-anchored steep lean can
+    be much larger than what "looks half done" (measured: a deliberate,
+    visually-more-than-half drag scored only 0.45 on this metric and
+    wrongly sprang back). Replaced with the simplest, most robust
+    measure available: `d > W * 0.5` directly — after the dragStart fix,
+    `d` is already an exact, lean-independent count of pixels dragged,
+    which is also plainly what "dragged it about halfway" means.
+  - Lean angle: frame-by-frame comparison against Heyzine's own
+    reference recording showed the allowed lean isn't one fixed angle
+    through a whole drag — small drags right at a corner lean steeply
+    (~45° in their reference, a natural dog-ear peel), but the SAME drag
+    straightens back toward vertical (~15-20°) as it continues toward
+    completion. A single fixed clamp (tried at both 75° and 28°) can't
+    reproduce that arc. Replaced with a clamp that itself shrinks as the
+    drag progresses toward its own half-page point: `55° - 38° *
+    min(1, d/(W*0.5))`, i.e. up to 55° early, narrowing to 17° by
+    halfway. Verified directly: a constant 45°-angle drag input now
+    produces a fold angle that starts at 45° and narrows to 17° as it
+    grows, matching the measured Heyzine pattern.
+
 ## Still open
 Nothing outstanding — engine confirmed matching Heyzine's behavior and
 feel as of 2026-08-03. Next step (deferred, needs explicit go-ahead): port

@@ -691,16 +691,23 @@ canvas.addEventListener('pointermove', (e) => {
   const JITTER_DEAD_ZONE = 6;
   d = Math.max(0, Math.min(maxD(), len - JITTER_DEAD_ZONE));
   // The fold direction tracks the pointer live and can lean with the
-  // vertical drag, like a real page does — but Heyzine's own fold stays
-  // close to a natural, straight-across turn even when you drag quite
-  // erratically vertically; it doesn't swing to match the raw drag
-  // vector's angle the way an earlier, much larger clamp here did (75°
-  // let a mostly-vertical drag produce a steep near-diagonal slice that
-  // read as "wrong direction" rather than a page turning on its spine).
-  // A much tighter clamp keeps the lean as a subtle flourish instead of
-  // letting vertical mouse movement redirect the turn itself.
+  // vertical drag, like a real page does — but comparing frame-by-frame
+  // against Heyzine's own reference recording shows the ALLOWED lean
+  // isn't a fixed angle throughout a drag: right at a corner grab, small
+  // drags can lean quite steeply (measured close to 45° in their
+  // reference, matching a natural dog-ear peel), but the crease
+  // consistently straightens back toward vertical as the same drag
+  // continues — by the time it's roughly halfway to closing, Heyzine's
+  // own crease sits within ~15-20° of vertical even when the drag itself
+  // is far from straight. A single fixed clamp can't reproduce that: it
+  // either keeps early small peels too straight (already tried at 75°
+  // and 28°, both read as "wrong direction" since the same angle carried
+  // all the way through) or lets a big, mostly-complete turn stay too
+  // diagonal. Shrinking the clamp itself as the drag progresses toward
+  // its own closure distance reproduces both ends of that behaviour.
   if (len > 1) {
-    const MAX_LEAN = 28 * Math.PI / 180;
+    const progress = Math.min(1, d / (W * 0.5));
+    const MAX_LEAN = (55 - 38 * progress) * Math.PI / 180;
     let ang = Math.atan2(vy, vx * anchorDir);
     ang = Math.max(-MAX_LEAN, Math.min(MAX_LEAN, ang));
     curN = { x: anchorDir * Math.cos(ang), y: Math.sin(ang) };
@@ -710,18 +717,19 @@ canvas.addEventListener('pointermove', (e) => {
 canvas.addEventListener('pointerup', () => {
   if (!dragging) return;
   dragging = false;
-  // Commit once the drag is more than halfway to THIS anchor/lean's own
-  // full-closure distance. `lastReach` (the flap's paint bounds) looks
-  // like the natural thing to compare here, but it isn't reliable for
-  // this: it's the extent of a polygon whose corners can land far from
-  // the crease for a steep lean near a page corner, so it can vastly
-  // overshoot the actual drag distance (a real jitter of a few pixels
-  // was measured at "lastReach" of 250+, wrongly committing to a full
-  // page turn from what was barely a twitch). Comparing `d` itself
-  // against fullCloseD's own scale doesn't have that problem — both
-  // sides of the comparison come from the same anchor/lean, so a tiny
-  // drag reads as tiny regardless of how the polygon happens to project.
-  if (d > fullCloseD(anchorPoint, curN) * 0.5) animateD(fullCloseD(anchorPoint, curN), 440, anchorDir, true);
+  // Commit once the pointer has actually travelled more than half the
+  // page's width — plain and literal, deliberately not compared against
+  // any lean-dependent geometric quantity. Both `lastReach` (the flap's
+  // paint bounds) and `fullCloseD` (distance to full closure) were tried
+  // here and both broke: a fold line's ANGLE alone can split the page
+  // rectangle very unevenly by area near a corner, independent of how
+  // far it's actually been dragged, so both a tiny jitter and a genuine
+  // half-page drag could land almost anywhere on those scales depending
+  // on the anchor/lean. `d` itself doesn't have that problem — after the
+  // dragStart fix above it's already an exact, lean-independent measure
+  // of how many pixels the pointer has moved, which is also plainly what
+  // a user means by "I dragged it about halfway."
+  if (d > W * 0.5) animateD(fullCloseD(anchorPoint, curN), 440, anchorDir, true);
   else animateD(0, 320, anchorDir, false);
 });
 canvas.addEventListener('pointerleave', () => {
