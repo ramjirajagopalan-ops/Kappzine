@@ -443,22 +443,23 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
     ctx.clip();
   }
 
-  // Flat white alone read as too flat — Heyzine's paper is still mostly
-  // white but has a soft mid-tone shading that makes it read as a curved,
-  // slightly bulging sheet rather than a flat cut-out triangle. Bring
-  // back a gradient, but stay close to white throughout (no cream/tan
-  // tones) and keep the darkest point comfortably before the tip, with a
-  // long fade back to white — the earlier artifact came from a stop
-  // sitting close to the tip's sharp point, not from having a gradient
-  // at all.
+  // Real paper only visibly rolls right at the crease itself — the rest
+  // of the flap, further toward the tip, stays flat. Spreading the
+  // shading across the whole flap (tried previously) doesn't match that:
+  // Heyzine's own paper is flat white everywhere except a narrow curved
+  // highlight/shadow hugging the fold line. So: flat white base for the
+  // whole flap, then a narrow "roll" band right at the crease.
   const reach = -Math.min(...flapLocal.map(p => p.x), -half);
-  const paper = ctx.createLinearGradient(0, 0, -reach, 0);
-  paper.addColorStop(0, '#ffffff');
-  paper.addColorStop(0.4, '#f3f3f1');
-  paper.addColorStop(0.68, '#dddbd6');
-  paper.addColorStop(1, '#ffffff');
-  ctx.fillStyle = paper;
+  ctx.fillStyle = '#ffffff';
   fillBandLocal(0, -reach);
+
+  const bandW = Math.min(46, reach * 0.5);
+  const roll = ctx.createLinearGradient(0, 0, -bandW, 0);
+  roll.addColorStop(0, '#ffffff');
+  roll.addColorStop(0.5, '#dcdad3');
+  roll.addColorStop(1, '#ffffff');
+  ctx.fillStyle = roll;
+  fillBandLocal(0, -bandW);
 
   ctx.restore();
   ctx.restore();

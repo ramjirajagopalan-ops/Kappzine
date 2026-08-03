@@ -53,15 +53,14 @@ Artifact link shared in chat).
   whether the right page is showing through.
 - White background.
 
-- Curl paper is mostly white with a soft, subtle mid-tone gradient (white
-  at the crease → very light grey mid-curve → white again near the tip),
-  giving it a gently bulged/curved look like Heyzine's, without the cream
-  tint or the tip-vertex artifact the first gradient attempt had (fixed
-  2026-08-03 — flat solid white alone, tried first, read as too flat
-  compared to Heyzine's subtly rounded paper; the fix keeps every stop
-  close to white and keeps the darkest stop well before the tip's sharp
-  point, with a long fade back to white, instead of a stop sitting close
-  to that point the way the original attempt did).
+- Curl paper is flat white everywhere except a narrow "roll" band hugging
+  the crease line itself (fixed 2026-08-03, per a user-annotated
+  screenshot circling the exact region on both Heyzine's and our curl —
+  it was the crease line, not the whole flap). Real paper only visibly
+  bends right at the fold; the rest of the flap, further toward the tip,
+  is flat. An earlier attempt spread the shading across the entire flap
+  (crease to tip), which is why it never quite matched — Heyzine's flap is
+  flat white except right at the bend.
 
 ## Still open
 - One more geometric issue flagged by the user, not yet described in
