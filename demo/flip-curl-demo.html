@@ -717,7 +717,7 @@ canvas.addEventListener('pointermove', (e) => {
 canvas.addEventListener('pointerup', () => {
   if (!dragging) return;
   dragging = false;
-  // Commit once the pointer has actually travelled more than half the
+  // Commit once the pointer has actually travelled more than 40% of the
   // page's width — plain and literal, deliberately not compared against
   // any lean-dependent geometric quantity. Both `lastReach` (the flap's
   // paint bounds) and `fullCloseD` (distance to full closure) were tried
@@ -728,8 +728,8 @@ canvas.addEventListener('pointerup', () => {
   // on the anchor/lean. `d` itself doesn't have that problem — after the
   // dragStart fix above it's already an exact, lean-independent measure
   // of how many pixels the pointer has moved, which is also plainly what
-  // a user means by "I dragged it about halfway."
-  if (d > W * 0.5) animateD(fullCloseD(anchorPoint, curN), 440, anchorDir, true);
+  // a user means by "I dragged it about 40% of the way."
+  if (d > W * 0.4) animateD(fullCloseD(anchorPoint, curN), 440, anchorDir, true);
   else animateD(0, 320, anchorDir, false);
 });
 canvas.addEventListener('pointerleave', () => {
