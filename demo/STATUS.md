@@ -37,6 +37,12 @@ Artifact link shared in chat).
   cutout instead of Heyzine's soft, diffuse falloff). This also fixed a
   bug from the taper change where the crease-side shadow was being clipped
   away almost entirely.
+- Shadow no longer bleeds along the full length of the fold line for a
+  tapered/leaning flap (fixed 2026-08-03 — spotted as a shadow visibly
+  disconnected from the curl, trailing on well past where the visible
+  paper actually ends). The shadow fills are now bounded to the flap's own
+  along-crease extent (plus a small blur margin), not the flap's full
+  theoretical line length.
 - Debug-colored pages (`DEBUG_COLORS` in the file) so it's obvious at a glance
   whether the right page is showing through.
 - White background.

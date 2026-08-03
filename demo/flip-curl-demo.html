@@ -398,28 +398,6 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
   ctx.translate(F.x, F.y);
   ctx.rotate(angle);
 
-  // Soft cast shadows onto the surfaces AROUND the flap — the still-flat
-  // page next to the crease, and the next page beyond the flap's tip.
-  // These belong to the surface being shadowed, not to the flap's own
-  // silhouette, so they're drawn before the flap's clip is established
-  // (and blurred) rather than hard-clipped to its tapered shape, which
-  // is what made our shadow look like a sharp cutout instead of the soft,
-  // diffuse falloff a real cast shadow has.
-  ctx.save();
-  ctx.filter = 'blur(9px)';
-  const gShadowCrease = ctx.createLinearGradient(0, 0, 42, 0);
-  gShadowCrease.addColorStop(0, 'rgba(0,0,0,0.34)');
-  gShadowCrease.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = gShadowCrease;
-  fillBandLocal(42, 0);
-
-  const gShadowTip = ctx.createLinearGradient(-half - 55, 0, -half, 0);
-  gShadowTip.addColorStop(0, 'rgba(0,0,0,0)');
-  gShadowTip.addColorStop(1, 'rgba(0,0,0,0.3)');
-  ctx.fillStyle = gShadowTip;
-  fillBandLocal(-half, -half - 55);
-  ctx.restore();
-
   // The flap's real shape is the reflection of whatever part of the page
   // rectangle actually lies beyond the fold line — NOT a band that spans
   // the full canvas height regardless of angle. For a straight-across
@@ -434,6 +412,39 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
   };
   const cornersLocal = [toLocal(0, 0), toLocal(W, 0), toLocal(W, H), toLocal(0, H)];
   const flapLocal = clipHalfPlaneLX(cornersLocal).map(p => ({ x: -p.x, y: p.y }));
+
+  // Soft cast shadows onto the surfaces AROUND the flap — the still-flat
+  // page next to the crease, and the next page beyond the flap's tip.
+  // These are drawn before the flap's own clip is established (and
+  // blurred) so they aren't hard-cut to its silhouette, giving a soft,
+  // diffuse falloff instead of a sharp cutout. But they must still stay
+  // close to where the flap actually is: a plain fillBandLocal fills the
+  // ENTIRE length of the fold line, so for a leaning/tapered flap that
+  // only covers part of that line, the shadow bled along its whole length
+  // into parts of the page nowhere near any visible curl. Clip to the
+  // flap's own along-crease extent (with a little padding for the blur)
+  // before painting either shadow.
+  if (flapLocal.length >= 3) {
+    const flapYs = flapLocal.map(p => p.y);
+    const padY = 26;
+    const yLo = Math.min(...flapYs) - padY, yHi = Math.max(...flapYs) + padY;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(-BIG, yLo, BIG * 2, yHi - yLo); ctx.clip();
+    ctx.filter = 'blur(9px)';
+    const gShadowCrease = ctx.createLinearGradient(0, 0, 42, 0);
+    gShadowCrease.addColorStop(0, 'rgba(0,0,0,0.34)');
+    gShadowCrease.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gShadowCrease;
+    fillBandLocal(42, 0);
+
+    const gShadowTip = ctx.createLinearGradient(-half - 55, 0, -half, 0);
+    gShadowTip.addColorStop(0, 'rgba(0,0,0,0)');
+    gShadowTip.addColorStop(1, 'rgba(0,0,0,0.3)');
+    ctx.fillStyle = gShadowTip;
+    fillBandLocal(-half, -half - 55);
+    ctx.restore();
+  }
+
   if (flapLocal.length >= 3) {
     ctx.beginPath();
     ctx.moveTo(flapLocal[0].x, flapLocal[0].y);
