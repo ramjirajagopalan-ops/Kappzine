@@ -344,6 +344,45 @@ Artifact link shared in chat).
   - Re-ran the entire regression suite (single-page + all spread tests)
     afterward — everything still passes.
 
+- **Smooth cover<->spread morph, replacing the last resize pop (2026-08-03,
+  eleventh pass).** User feedback with a fresh Heyzine-vs-Kappzine
+  recording (`fba52edc-Recording_20260803_183459.mp4`): "the first page
+  will be always in the center. once we drag the page, it slowly, neatly
+  moves to the right... see ours, its just flipping the page and
+  suddenly we see the 2nd and 3rd page." Frame-by-frame study of
+  Heyzine's own reference confirmed the cover stays a normal single-page
+  curl right up to release, then the STAGE itself smoothly widens into
+  the spread rather than snapping — exactly the transition still handled
+  by an abrupt `resize()` call in the ninth/tenth passes.
+  - Implementation (`runGrowMorph`/`runShrinkMorph`): since a canvas is
+    just a bitmap, animating `canvas.width` while always drawing every
+    page at its FINAL absolute position means the growing/shrinking
+    canvas bounds naturally reveal or crop content on their own — no
+    need to separately track or fade page positions. Opening: canvas
+    width animates from the single-page width up to the spread width
+    over 380ms while page 1 (now flattened, per the ordinary single-page
+    curl that already ran) sits fixed at the left slot and page 2
+    progressively reveals on the right as the canvas widens. Closing is
+    the same in reverse.
+  - Caught a real pre-existing bug while building this: closing FROM an
+    interior spread back to the front cover starts with `spreadActive`
+    already true (currentIndex=1 is interior, not a cover), so it was
+    running the normal interior spread-flip formulas — which compute a
+    "new right page" pairing that doesn't exist next to a cover,
+    producing a broken half-blank spread instead of a proper closing
+    curl. Fixed with a `boundaryClosing` flag that routes this specific
+    drag through a new `renderBoundaryClosing`, reusing single-page
+    mode's exact curl geometry (via `renderCornerCurl`'s rect options)
+    scoped to just the flipping page's own half of the still-spread-sized
+    canvas — which conveniently is also exactly the right starting point
+    for the shrink morph that follows.
+  - Verified: canvas width animates continuously (e.g. 460→679→917→920px
+    across frames, not a single jump) in both directions, the boundary-
+    closing curl itself looks like a normal single-page leaning peel, the
+    full navigation cycle still lands on the correct page/spread at every
+    step, and the entire pre-existing single-page regression suite still
+    passes.
+
 ## Still open
 - Port the finalized engine (single + double-page spread) into
   `FlipbookViewer.tsx`, replacing StPageFlip — deferred, needs explicit
