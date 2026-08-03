@@ -425,6 +425,19 @@ Artifact link shared in chat).
     afterward.
 
 ## Still open
+- **Cover <-> spread transition: user checked the twelfth-pass fix
+  (2026-08-03) and said "its not correct" — NOT resolved, paused here for
+  the day.** No further detail given yet on what's specifically still
+  wrong (they said "we will discuss tomorrow"). Do not assume the
+  continuous-width-tied-to-`d` mechanism itself is the right direction
+  going in — re-examine with fresh eyes and, ideally, a new reference
+  video/screenshot pointing at exactly what still looks off, the same
+  way each prior round in this section was actually diagnosed (frame
+  extraction + side-by-side comparison), rather than continuing to guess
+  from the last screenshot alone. Everything through the twelfth pass
+  (see entries above) is committed and pushed; the regression suite
+  passes; but that only proves those specific checks are fine — it does
+  NOT mean the transition matches Heyzine, per the user's own testing.
 - Port the finalized engine (single + double-page spread) into
   `FlipbookViewer.tsx`, replacing StPageFlip — deferred, needs explicit
   go-ahead. Note: the production upload pipeline (`processPdf.ts`,
