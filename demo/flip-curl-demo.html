@@ -302,16 +302,17 @@ let anchorDir = 1; // 1 = right edge (next), -1 = left edge (prev)
 // edge eases in a small corner curl, same as Heyzine does before you've
 // even pressed down, instead of giving no visual feedback until a drag
 // actually starts.
-let hoverD = 0, hoverTarget = 0, hoverDir = 1, hoverAnimId = null;
+let hoverD = 0, hoverTarget = 0, hoverDir = 1, hoverCorner = 1, hoverAnimId = null;
 function hoverStep() {
   const diff = hoverTarget - hoverD;
-  hoverD = Math.abs(diff) < 0.4 ? hoverTarget : hoverD + diff * 0.2;
+  hoverD = Math.abs(diff) < 0.4 ? hoverTarget : hoverD + diff * 0.15;
   if (!dragging && d < 1) render();
   if (Math.abs(hoverTarget - hoverD) > 0.4) hoverAnimId = requestAnimationFrame(hoverStep);
   else hoverAnimId = null;
 }
-function setHoverTarget(target, dir) {
+function setHoverTarget(target, dir, corner) {
   hoverDir = dir;
+  if (corner) hoverCorner = corner;
   hoverTarget = target;
   if (!hoverAnimId) hoverAnimId = requestAnimationFrame(hoverStep);
 }
@@ -355,6 +356,28 @@ function clipHalfPlaneLX(poly) {
 // How much of the page (in px) is actually visibly folded over right
 // now, updated on every renderCornerCurl call — see its use in pointerup.
 let lastReach = 0;
+
+// The exact `dd` at which the front page becomes fully hidden for this
+// anchor/lean — i.e. every page corner has crossed to the far side of
+// the fold line, so a bigger `dd` couldn't change anything visible any
+// further (both the flap and the base "next page" layer are already
+// clipped to the same canvas rect regardless). A corner (cx,cy) crosses
+// once (anchor-corner)·n >= dd, so the requirement is just the largest
+// of those four dot products — no search needed, and unlike a reach-
+// based approach, this can't be thrown off by the fold's pivot point
+// moving outside the canvas once dd is large (reach as such keeps
+// climbing with dd past that point even though nothing more is visible,
+// which is exactly what produced a completion animation with a long
+// dead tail after an apparent instant snap).
+function fullCloseD(anchor, n) {
+  const corners = [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: H }, { x: 0, y: H }];
+  let need = 1;
+  for (const c of corners) {
+    const v = (anchor.x - c.x) * n.x + (anchor.y - c.y) * n.y;
+    if (v > need) need = v;
+  }
+  return need;
+}
 
 // Renders a full-height page fold as a flat mirror-fold — the reflected
 // edge lands exactly at the drag point, direction tracks the pointer
@@ -501,9 +524,7 @@ function renderCornerCurl(frontImg, nextImg, dd, anchor, n) {
 
 function render() {
   ctx.clearRect(0, 0, W, H);
-  if (d >= Math.hypot(W, H) - 1) {
-    ctx.drawImage(pageImg(currentIndex + anchorDir), 0, 0);
-  } else if (!dragging && d < 1 && hoverD > 0.5) {
+  if (!dragging && d < 1 && hoverD > 0.5) {
     // Anchored at the exact top corner, leaning at 45° back into the
     // page — for THIS anchor/direction pair specifically, that keeps the
     // fold line's pivot (F) just inside the page near the corner, so the
@@ -512,9 +533,20 @@ function render() {
     // corner, pushes F outside the canvas and the "beyond the fold"
     // region balloons to include most of the page — worth remembering
     // before changing this.)
-    const hAnchor = { x: hoverDir === 1 ? W : 0, y: 0 };
-    const hN = { x: hoverDir * Math.SQRT1_2, y: -Math.SQRT1_2 };
+    // Same idea for the bottom corner, mirrored vertically: anchor at
+    // (edge, H) with the lean's y-component flipped so F again lands
+    // just inside the page near THAT corner instead of the top one.
+    const hAnchor = { x: hoverDir === 1 ? W : 0, y: hoverCorner === 1 ? 0 : H };
+    const hN = { x: hoverDir * Math.SQRT1_2, y: hoverCorner === 1 ? -Math.SQRT1_2 : Math.SQRT1_2 };
     renderCornerCurl(pageImg(currentIndex), pageImg(currentIndex + hoverDir), hoverD, hAnchor, hN);
+  } else if (d > 0.5 && d >= fullCloseD(anchorPoint, curN) - 1) {
+    // Past the point where the visible reach has already saturated for
+    // THIS anchor/lean — draw the plain flat page instead of computing
+    // curl geometry that would look identical. Comparing against a fixed
+    // worst-case constant here (as an earlier version did) is what
+    // caused the completion animation's dead tail: for most drags the
+    // real saturation point is much sooner than that constant.
+    ctx.drawImage(pageImg(currentIndex + anchorDir), 0, 0);
   } else {
     renderCornerCurl(pageImg(currentIndex), pageImg(currentIndex + anchorDir), d, anchorPoint, curN);
   }
@@ -530,7 +562,7 @@ function updateIndicator() {
   nextBtn.disabled = currentIndex >= PAGES.length - 1 && d <= 0.5;
 }
 
-function animateD(target, duration, dir) {
+function animateD(target, duration, dir, commit) {
   cancelAnimationFrame(animId);
   const start = d;
   const t0 = performance.now();
@@ -542,7 +574,12 @@ function animateD(target, duration, dir) {
     if (p < 1) {
       animId = requestAnimationFrame(step);
     } else {
-      if (target >= maxD() - 1) {
+      // Whether this animation finished by completing the turn (advance
+      // the page) or springing back (stay put) is now passed in
+      // explicitly, rather than inferred from whether `target` happened
+      // to equal the old fixed worst-case ceiling — that inference broke
+      // once the target became the per-drag saturation point instead.
+      if (commit) {
         currentIndex = Math.max(0, Math.min(PAGES.length - 1, currentIndex + dir));
         playFlipSound();
       }
@@ -553,7 +590,16 @@ function animateD(target, duration, dir) {
   animId = requestAnimationFrame(step);
 }
 
-function maxD() { return Math.hypot(W, H); }
+// This used to be the page's full diagonal (hypot(W,H)) — but the flap's
+// visible reach is bounded by the page rectangle itself (via the taper
+// clip) and saturates well before `d` gets anywhere near that diagonal,
+// even at the steepest allowed lean. Animating `d` all the way to the
+// diagonal meant most of the completion animation's eased duration was
+// spent AFTER the page already looked fully closed — a fast visual snap
+// followed by a dead pause, not a smooth continuous close. This value is
+// comfortably above what steep leans need (checked up to the 75° lean
+// clamp) with no such dead tail.
+function maxD() { return Math.max(W, H) * 1.15; }
 
 function resize() {
   const rect = stageWrapper.getBoundingClientRect();
@@ -603,11 +649,15 @@ canvas.addEventListener('pointermove', (e) => {
     // before you've even pressed down.
     const dir = edgeZoneDir(x);
     const canGo = dir === 1 ? currentIndex < PAGES.length - 1 : dir === -1 && currentIndex > 0;
+    // Whichever corner (top or bottom) the pointer is actually closer to
+    // vertically — Heyzine's own hint follows this too, not just a fixed
+    // top-only hint regardless of where you're hovering.
+    const corner = y < H / 2 ? 1 : -1;
     // `half` here is the anchor-to-fold distance, not the hint's visible
     // "leg" length along the page edges — for the 45°-corner geometry
     // above, leg = half / Math.SQRT1_2 (i.e. half = leg * Math.SQRT1_2).
     const legLen = Math.min(60, W * 0.14);
-    setHoverTarget(canGo ? legLen * Math.SQRT1_2 : 0, dir || hoverDir);
+    setHoverTarget(canGo ? legLen * Math.SQRT1_2 : 0, dir || hoverDir, corner);
     return;
   }
   // n must point FROM the fold line TOWARD the anchor, i.e. from the
@@ -639,21 +689,21 @@ canvas.addEventListener('pointerup', () => {
   // page's full diagonal, which (even after the reach fix above) doesn't
   // track how much of the page LOOKS turned for anything but a dead
   // straight, corner-to-corner drag.
-  if (lastReach > W * 0.5) animateD(maxD(), 260, anchorDir);
-  else animateD(0, 220, anchorDir);
+  if (lastReach > W * 0.5) animateD(fullCloseD(anchorPoint, curN), 440, anchorDir, true);
+  else animateD(0, 320, anchorDir, false);
 });
 canvas.addEventListener('pointerleave', () => {
   setHoverTarget(0, hoverDir);
   if (!dragging) return;
   dragging = false;
-  animateD(0, 220, anchorDir);
+  animateD(0, 320, anchorDir, false);
 });
 
 function programmaticFlip(dir) {
   anchorPoint = { x: dir === 1 ? W : 0, y: H / 2 };
   anchorDir = dir;
   curN = { x: dir, y: 0 };
-  animateD(maxD(), 480, dir);
+  animateD(fullCloseD(anchorPoint, curN), 480, dir, true);
 }
 nextBtn.addEventListener('click', () => { if (currentIndex < PAGES.length - 1) programmaticFlip(1); });
 prevBtn.addEventListener('click', () => { if (currentIndex > 0) programmaticFlip(-1); });

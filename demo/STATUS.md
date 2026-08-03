@@ -93,6 +93,42 @@ Artifact link shared in chat).
   the reflected region balloons to include most of the page (hit this
   exact bug once already — see git history if it needs touching again).
 
+- Completion animation is smooth (no dead tail), and hover hint appears
+  at bottom corners too, not just top (fixed 2026-08-03, third pass from
+  a screen recording). Root causes:
+  - The completion animation targeted the page's full diagonal even
+    after the earlier "1.15x" tightening — the flap's visible reach
+    doesn't scale with an arbitrary constant at all, so most drags
+    still hit their real visual close point well before the animation's
+    target, producing a fast snap then a long dead pause. Replaced with
+    `fullCloseD(anchor, n)`: an exact, non-iterative formula (max over
+    the 4 page corners of `(anchor-corner)·n`) giving the precise `d` at
+    which every corner has crossed the fold line and the front page is
+    fully hidden — no more, no less, for whatever the current anchor/lean
+    actually is. `animateD` now also takes an explicit `commit` boolean
+    instead of inferring "did we reach the far end" by comparing the
+    target to a constant, which broke once the target became per-drag.
+  - Along the way, an interim attempt at the above (searching for where
+    a computed "reach" plateaus) had a subtle bug: once the fold's pivot
+    point moves outside the canvas (which happens well before visual
+    closure for a straight drag), that reach calculation keeps climbing
+    with `d` even though nothing more is visible, so the search never
+    found a genuine plateau. Replaced with the exact corner-crossing
+    formula above, which has no such blind spot.
+  - Fixing the snap condition then surfaced a real regression: the new
+    per-drag check ran even at total idle (d=0) using the default,
+    never-yet-set anchor/direction, which can degenerately evaluate as
+    "already closed" and snap straight to the next page on page load —
+    caught by the regression suite (center-click-does-nothing test
+    started failing). Fixed by gating the whole check on `d > 0.5` first.
+  - Hover hint: added a `hoverCorner` (top/bottom) alongside the existing
+    `hoverDir` (left/right), chosen by which half of the page height the
+    pointer is actually in, mirroring the same corner-anchor trick
+    vertically for the bottom case.
+  - Also slowed the animation durations (260/220ms → 440/320ms) and the
+    hover ease rate, per direct user feedback that the motion felt too
+    fast/abrupt even after the dead-tail fix.
+
 ## Still open
 Nothing outstanding — engine confirmed matching Heyzine's behavior and
 feel as of 2026-08-03. Next step (deferred, needs explicit go-ahead): port
