@@ -45,9 +45,18 @@
   .corner-nav.prev { left: 2px; } .corner-nav.next { right: 2px; }
   .toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; padding: 2px 6px 14px; flex: 0 0 auto; position: relative; z-index: 10; background: var(--bg); }
   header, .subhead { position: relative; z-index: 10; background: var(--bg); }
+
+  /* The real Fullscreen API is blocked inside a sandboxed artifact iframe
+     (no allow="fullscreen" on the host frame) — requestFullscreen() just
+     silently rejects there. #shell.pseudo-fs is the fallback: hide the
+     chrome and let the book use the whole viewport, so the button still
+     visibly does something instead of no-op'ing. */
+  #shell.pseudo-fs header, #shell.pseudo-fs .subhead { display: none; }
   .btn { appearance: none; border: 1px solid var(--line); background: transparent; color: var(--muted); font: inherit; display: flex; align-items: center; justify-content: center; height: 34px; width: 34px; border-radius: 999px; cursor: pointer; transition: background .14s, color .14s, border-color .14s; }
   .btn:hover { color: var(--ink); border-color: var(--accent); }
   .btn.active { background: var(--accent); color: #17140f; border-color: var(--accent); }
+  .btn:disabled { opacity: .32; cursor: not-allowed; }
+  .btn:disabled:hover { color: var(--muted); border-color: var(--line); }
   .divider { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
   .page-count { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 96px; text-align: center; }
 
@@ -233,7 +242,7 @@
       </button>
       <div class="divider"></div>
       <button class="btn" id="fullscreenBtn" title="Fullscreen">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path id="fullscreenIconPath" d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
       </button>
     </div>
   </main>
@@ -2767,6 +2776,21 @@ mode1Btn.addEventListener('click', () => setMode('single'));
 mode2Btn.addEventListener('click', () => setMode('double'));
 modeAutoBtn.addEventListener('click', () => setMode('auto'));
 
+// Forcing double page needs at least 2x its per-page minWidth (220px) of
+// real container width, or the spread overflows the viewport sideways —
+// exactly what happened on a narrow phone in portrait. Match Heyzine's own
+// behaviour: don't offer a control that breaks the layout, just fall back
+// to Auto (which already renders single-page correctly at that width).
+function updateModeAvailability() {
+  const w = stageWrapper.clientWidth || window.innerWidth;
+  const canDouble = w >= 480;
+  mode2Btn.disabled = !canDouble;
+  mode2Btn.title = canDouble ? 'Double page' : 'Double page (needs a wider screen)';
+  if (!canDouble && mode === 'double') setMode('auto');
+}
+window.addEventListener('resize', updateModeAvailability);
+updateModeAvailability();
+
 const hardCoverBtn = document.getElementById('hardCoverBtn');
 hardCoverBtn.addEventListener('click', () => {
   hardCover = !hardCover;
@@ -2780,9 +2804,36 @@ hardCoverBtn.addEventListener('click', () => {
 });
 
 const fullscreenBtn = document.getElementById('fullscreenBtn');
-fullscreenBtn.addEventListener('click', () => {
-  if (!document.fullscreenElement) mainArea.requestFullscreen?.().catch(() => {});
-  else document.exitFullscreen?.();
+const fullscreenIconPath = document.getElementById('fullscreenIconPath');
+const shellEl = document.getElementById('shell');
+const EXPAND_ICON = 'M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3';
+const SHRINK_ICON = 'M9 3v3a2 2 0 0 1-2 2H4m16 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M4 15h3a2 2 0 0 1 2 2v3';
+function setPseudoFullscreen(on) {
+  shellEl.classList.toggle('pseudo-fs', on);
+  fullscreenBtn.classList.toggle('active', on);
+  fullscreenIconPath.setAttribute('d', on ? SHRINK_ICON : EXPAND_ICON);
+  requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+}
+fullscreenBtn.addEventListener('click', async () => {
+  if (!document.fullscreenElement) {
+    try {
+      await mainArea.requestFullscreen();
+    } catch (e) {
+      // Real Fullscreen API is blocked here (sandboxed artifact iframe
+      // without allow="fullscreen") — fall back to hiding the chrome via
+      // CSS so the button still does something visible.
+      setPseudoFullscreen(!shellEl.classList.contains('pseudo-fs'));
+    }
+  } else {
+    document.exitFullscreen?.();
+  }
+});
+document.addEventListener('fullscreenchange', () => {
+  fullscreenBtn.classList.toggle('active', !!document.fullscreenElement);
+  fullscreenIconPath.setAttribute('d', document.fullscreenElement ? SHRINK_ICON : EXPAND_ICON);
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && shellEl.classList.contains('pseudo-fs')) setPseudoFullscreen(false);
 });
 
 // ---- Added: autoplay ----
