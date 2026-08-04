@@ -2612,7 +2612,7 @@ function buildFlip() {
   const minWidth = mode === 'single' ? 340 : mode === 'auto' ? 380 : 220;
   const maxWidth = 560;
   const minHeight = 240;
-  const maxHeight = 660;
+  const maxHeight = 860; // matches FlipbookViewer.tsx's own cap
 
   pageFlip = new St.PageFlip(bookHost, {
     width: Math.round(pageAspect * maxHeight),

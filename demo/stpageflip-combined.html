@@ -107,6 +107,15 @@
   .demo-back-btn:hover { color: var(--accent); border-color: var(--accent); }
   /* Overlays (TOC/zoom/share/QR) are appended to document.body, outside #demoScreen (z-index 100) — bump above it. */
   .overlay-scrim { z-index: 150; }
+
+  /* Trimmed-down demo chrome: the brand header + long subhead paragraph
+     ate most of the viewport on mobile, leaving no room for the book or
+     toolbar. Drop them to a small fixed page-count pill so the magazine
+     gets the full screen when opened from the homepage. */
+  #demoScreen .shell > header { position: fixed; top: 14px; right: 14px; z-index: 30; padding: 0; background: transparent; }
+  #demoScreen .shell > header .brand { display: none; }
+  #demoScreen .shell > header .page-count { background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; box-shadow: 0 4px 16px rgba(0,0,0,.08); min-width: 0; }
+  #demoScreen .subhead { display: none; }
 </style>
 
 
@@ -2702,7 +2711,7 @@ function buildFlip() {
   const minWidth = mode === 'single' ? 340 : mode === 'auto' ? 380 : 220;
   const maxWidth = 560;
   const minHeight = 240;
-  const maxHeight = 660;
+  const maxHeight = 860; // matches FlipbookViewer.tsx's own cap
 
   pageFlip = new St.PageFlip(bookHost, {
     width: Math.round(pageAspect * maxHeight),
