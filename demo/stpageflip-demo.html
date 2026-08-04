@@ -142,7 +142,7 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
       </button>
       <div class="divider"></div>
-      <button class="btn" id="fullscreenBtn" title="Fullscreen">
+      <button class="btn" id="fullscreenBtn" title="Maximize (true fullscreen isn't available inside this preview embed)">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path id="fullscreenIconPath" d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
       </button>
     </div>
@@ -2600,10 +2600,42 @@ function buildPageEls() {
   });
 }
 
-// Mirrors FlipbookViewer.tsx's own PageFlip config exactly (same
-// width/height/size/shadow/timing), so this demo is representative of
-// what the production viewer would actually show, not a hand-tuned demo
-// config that happens to look nicer.
+const pageAspect = PAGE_W / PAGE_H;
+
+// StPageFlip's "stretch" size mode has its own internal width/height
+// resolution (a container that's allowed to grow past its intended cap, a
+// height derived from that unclamped width via a padding-bottom trick, an
+// orientation threshold that doubles as a literal CSS min-width) that kept
+// producing a new edge case every time the previous one got patched: an
+// oversized cover on wide screens, a toolbar pushed off-screen, a
+// double-page spread with the two pages stranded far apart inside an
+// unclamped container. Rather than keep patching around those internals,
+// this computes the exact page size ourselves — in plain, readable
+// arithmetic — and hands StPageFlip a literal 'fixed' width/height instead
+// of a min/max range for it to interpret. Margins are real percentages of
+// the actual stage size, not a side effect of some other clamp, which is
+// also what gets the book to sit inside comfortable white space instead of
+// stretching edge-to-edge, matching how Heyzine's own reader always leaves
+// visible breathing room around the page.
+function computePageSize() {
+  const stageW = stageWrapper.clientWidth || window.innerWidth;
+  const stageH = stageWrapper.clientHeight || window.innerHeight;
+  const budgetW = stageW * 0.86;
+  const budgetH = stageH * 0.9;
+
+  const spreadFactor = mode === 'double' ? 2 : mode === 'single' ? 1 : (stageW >= 700 ? 2 : 1);
+
+  let pageW = budgetW / spreadFactor;
+  let pageH = pageW / pageAspect;
+  if (pageH > budgetH) {
+    pageH = budgetH;
+    pageW = pageH * pageAspect;
+  }
+  pageW = Math.max(140, Math.min(620, pageW));
+  pageH = pageW / pageAspect;
+  return { pageW: Math.round(pageW), pageH: Math.round(pageH), spreadFactor };
+}
+
 function buildFlip() {
   if (pageFlip) {
     try { pageFlip.destroy(); } catch (e) { /* no-op */ }
@@ -2617,58 +2649,22 @@ function buildFlip() {
     bookHost.id = 'bookHost';
     stageWrapper.insertBefore(bookHost, nextBtn);
   }
-  const pageAspect = PAGE_W / PAGE_H;
-  // The near-instant "snap" on the cover's first flip (instead of the same
-  // ~850ms peel every other flip gets) wasn't actually the portrait ->
-  // landscape orientation change itself — Auto correctly switches from a
-  // solo cover to a spread once the container is wide enough, same as
-  // Heyzine's own reader, and that transition curls fine. It was that the
-  // container's rendered size went unclamped past its intended maxWidth on
-  // wide screens (below), which threw off the animation along with the
-  // layout. Single still gets its own always-portrait minWidth so it never
-  // becomes a spread, however wide the screen — scaled to the container
-  // rather than a fixed constant, since minWidth doubles as a hard CSS
-  // min-width on the book's container and a big constant would force
-  // horizontal overflow on anything narrower.
-  //
-  // Careful: the library silently resets maxWidth to 2000 if minWidth ever
-  // ends up bigger than maxWidth (its own internal settings guard), which
-  // blows the page up to fill the whole container — so for Single,
-  // minWidth and maxWidth are pinned to the same value instead of
-  // independently computed, guaranteeing minWidth <= maxWidth at every
-  // width.
-  const containerW = stageWrapper.clientWidth || window.innerWidth;
-  const singleWidth = Math.min(1000, Math.max(340, containerW));
-  const minWidth = mode === 'single' ? singleWidth : mode === 'auto' ? 380 : 220;
-  const maxWidth = mode === 'single' ? singleWidth : 560;
-  const minHeight = 240;
-  const maxHeight = 860; // matches FlipbookViewer.tsx's own cap
+
+  const { pageW, pageH, spreadFactor } = computePageSize();
 
   pageFlip = new St.PageFlip(bookHost, {
-    width: Math.round(pageAspect * maxHeight),
-    height: maxHeight,
-    size: 'stretch',
-    autoSize: true,
-    minWidth, maxWidth, minHeight, maxHeight,
+    width: pageW,
+    height: pageH,
+    size: 'fixed',
+    autoSize: false,
     showCover: hardCover,
-    usePortrait: mode !== 'double',
+    usePortrait: spreadFactor === 1,
     maxShadowOpacity: 0.6,
     flippingTime: 850,
     mobileScrollSupport: true,
     swipeDistance: 25,
     disableFlipByClick: false,
   });
-
-  // The library sizes its own container to a generous, unclamped
-  // width (up to 2x maxWidth) and derives its height from THAT width via
-  // a padding-bottom aspect-ratio trick, not from the available stage
-  // height — so on a wide screen a single portrait page could compute a
-  // height taller than the viewport with nothing to rein it back in.
-  // Pinning both here lets the library's own "shrink to fit the container
-  // height" logic (which compares against the container's real
-  // offsetHeight) actually engage.
-  bookHost.style.maxWidth = (maxWidth * (mode === 'double' ? 2 : 1)) + 'px';
-  bookHost.style.maxHeight = Math.min(maxHeight, stageWrapper.clientHeight || window.innerHeight) + 'px';
 
   pageFlip.loadFromHTML(buildPageEls());
   pageFlip.on('flip', (e) => updateIndicator(e.data));
@@ -2723,6 +2719,19 @@ function updateModeAvailability() {
 }
 window.addEventListener('resize', updateModeAvailability);
 updateModeAvailability();
+
+// 'fixed' size means StPageFlip won't reflow on its own the way 'stretch'
+// did — so a real rebuild is needed on resize/rotation for the page to
+// keep matching the stage, computed fresh each time via computePageSize().
+let resizeRebuildTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeRebuildTimer);
+  resizeRebuildTimer = setTimeout(() => {
+    const startPage = pageFlip ? pageFlip.getCurrentPageIndex() : 0;
+    buildFlip();
+    if (pageFlip && startPage) pageFlip.turnToPage(startPage);
+  }, 150);
+});
 
 const hardCoverBtn = document.getElementById('hardCoverBtn');
 hardCoverBtn.addEventListener('click', () => {
