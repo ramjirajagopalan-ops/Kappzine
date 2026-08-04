@@ -228,7 +228,7 @@ export function FlipbookViewer({
       showCover: flipbook.hardCovers,
       usePortrait: mode !== "DOUBLE",
       maxShadowOpacity: 0.6,
-      flippingTime: 700,
+      flippingTime: 850,
       mobileScrollSupport: true,
       swipeDistance: 25,
       disableFlipByClick: false,
