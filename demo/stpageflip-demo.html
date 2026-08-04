@@ -2631,7 +2631,13 @@ function computePageSize() {
     pageH = budgetH;
     pageW = pageH * pageAspect;
   }
-  pageW = Math.max(140, Math.min(620, pageW));
+  // Cap only from above (an absurdly large page on a huge monitor) — never
+  // floor it back up. A floor here can force pageW past what the height
+  // budget just fit it to, since pageH is re-derived from pageW afterwards;
+  // that's exactly what cropped the book top and bottom in a short
+  // landscape view. A small-but-fully-visible page beats a bigger one that
+  // overflows its own container.
+  pageW = Math.min(620, pageW);
   pageH = pageW / pageAspect;
   return { pageW: Math.round(pageW), pageH: Math.round(pageH), spreadFactor };
 }
@@ -2937,5 +2943,9 @@ updateIndicator = function (idx) {
 };
 
 setMode('auto');
+// Open already in the clean/maximized layout (chrome hidden) instead of
+// requiring a click on the maximize button first — the button still
+// toggles it back on to read the description if wanted.
+setPseudoFullscreen(true);
 })();
 </script>
