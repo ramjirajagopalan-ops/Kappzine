@@ -30,6 +30,7 @@ model Album {
   updatedAt     DateTime @updatedAt
 
   pages Page[]
+  views AlbumView[]
 
   @@index([slug])
 }
@@ -65,4 +66,21 @@ model Overlay {
   createdAt DateTime @default(now())
 
   @@index([pageId])
+}
+
+// One row per viewing session (a session id stored in a client cookie),
+// updated as the visitor flips through — not per page-flip event, to keep
+// writes cheap. maxPageIndex is the deepest page reached this session.
+model AlbumView {
+  id           String   @id @default(cuid())
+  albumId      String
+  album        Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  sessionId    String
+  maxPageIndex Int      @default(0)
+  pageCount    Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([albumId, sessionId])
+  @@index([albumId])
 }

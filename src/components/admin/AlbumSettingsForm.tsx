@@ -1,9 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import QRCode from 'qrcode';
 import type { AlbumDTO } from '@/lib/types';
 import { ASPECT_RATIOS, PAGE_MODES, THEMES } from '@/lib/validation';
+
+interface AlbumStats {
+  totalViews: number;
+  avgCompletionPercent: number;
+  completedViews: number;
+  lastViewedAt: string | null;
+}
 
 export default function AlbumSettingsForm({ album, onChange }: { album: AlbumDTO; onChange: () => void }) {
   const router = useRouter();
@@ -20,6 +28,24 @@ export default function AlbumSettingsForm({ album, onChange }: { album: AlbumDTO
   const [newPassword, setNewPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [publicUrl, setPublicUrl] = useState('');
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [stats, setStats] = useState<AlbumStats | null>(null);
+
+  useEffect(() => {
+    const url = `${window.location.origin}/album/${album.slug}`;
+    setPublicUrl(url);
+    QRCode.toDataURL(url, { margin: 1, width: 240, color: { dark: '#171512', light: '#efe8d8' } })
+      .then(setQrDataUrl)
+      .catch(() => setQrDataUrl(null));
+  }, [album.slug]);
+
+  useEffect(() => {
+    fetch(`/api/admin/albums/${album.id}/stats`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setStats)
+      .catch(() => undefined);
+  }, [album.id]);
 
   async function save(extra: Record<string, unknown> = {}) {
     setSaving(true);
@@ -185,6 +211,54 @@ export default function AlbumSettingsForm({ album, onChange }: { album: AlbumDTO
             </button>
           </form>
         )}
+      </section>
+
+      <section className="grid gap-3">
+        <h2 className="text-xs uppercase tracking-wider text-stone-400">Share &amp; Stats</h2>
+        <div className="flex flex-wrap items-start gap-6">
+          {qrDataUrl && (
+            <div className="text-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={qrDataUrl} alt="QR code linking to this album" className="rounded-md" width={140} height={140} />
+              <a
+                href={qrDataUrl}
+                download={`${album.slug}-qr.png`}
+                className="mt-1 block text-[11px] text-brass hover:underline"
+              >
+                Download QR
+              </a>
+            </div>
+          )}
+          <div className="grid gap-2 text-xs text-stone-400">
+            <div className="flex items-center gap-2">
+              <span className="max-w-[260px] truncate rounded border border-white/10 bg-black/20 px-2 py-1 text-stone-300">
+                {publicUrl}
+              </span>
+            </div>
+            <a
+              href={`/api/public/albums/${album.slug}/pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brass hover:underline"
+            >
+              Download album as PDF ↓
+            </a>
+            {stats && (
+              <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1">
+                <span>Views</span>
+                <span className="text-stone-200">{stats.totalViews}</span>
+                <span>Avg. completion</span>
+                <span className="text-stone-200">{stats.avgCompletionPercent}%</span>
+                <span>Finished album</span>
+                <span className="text-stone-200">{stats.completedViews}</span>
+                <span>Last viewed</span>
+                <span className="text-stone-200">
+                  {stats.lastViewedAt ? new Date(stats.lastViewedAt).toLocaleDateString() : '—'}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
       </section>
 
       <div className="flex items-center gap-4 border-t border-white/10 pt-6">
