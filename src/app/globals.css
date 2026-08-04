@@ -14,10 +14,22 @@
 
 .kz-stage {
   position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* StPageFlip's internal .stf__wrapper sizes itself to the full
+     potential landscape (two-page) bounds even when only one page is
+     shown (e.g. a lone cover) — clip it so that invisible extra height
+     doesn't sit on top of the controls rendered below the stage and
+     swallow their clicks. */
+  overflow: hidden;
 }
 
 .kz-book {
   position: relative;
+  height: 100%;
 }
 
 .kz-loading {

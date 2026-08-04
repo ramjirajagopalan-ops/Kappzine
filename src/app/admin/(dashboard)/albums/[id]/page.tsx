@@ -105,7 +105,7 @@ export default function AlbumEditorPage({ params }: { params: { id: string } }) 
       {tab === 'settings' && <AlbumSettingsForm album={album} onChange={load} />}
 
       {tab === 'preview' && (
-        <div className="flex justify-center rounded-lg border border-white/10 p-6" style={{ minHeight: 560 }}>
+        <div className="flex flex-col items-center justify-center rounded-lg border border-white/10 p-6" style={{ height: 720 }}>
           {album.pages.length === 0 ? (
             <p className="text-stone-500">Upload pages to preview the flipbook.</p>
           ) : (

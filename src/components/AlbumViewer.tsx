@@ -33,7 +33,7 @@ export default function AlbumViewer({ album }: { album: AlbumDTO }) {
 
   return (
     <div
-      className="flex min-h-[100dvh] flex-col"
+      className="flex h-[100dvh] flex-col"
       style={{ background: theme.bg }}
       ref={mainRef}
     >
@@ -46,7 +46,7 @@ export default function AlbumViewer({ album }: { album: AlbumDTO }) {
         <div className="text-[11px] uppercase tracking-[0.2em] text-stone-500">{pageLabel()}</div>
       </header>
 
-      <main className="flex flex-1 flex-col items-center justify-center gap-5 px-4 py-6">
+      <main className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 px-4 py-6">
         <FlipBook
           ref={flipRef}
           pages={album.pages}

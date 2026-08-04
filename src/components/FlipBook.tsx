@@ -22,8 +22,6 @@ interface FlipBookProps {
   onFlip?: (index: number, count: number) => void;
 }
 
-const BASE_PAGE_HEIGHT = 720;
-
 function overlayIcon(type: OverlayDTO['type']) {
   if (type === 'video') return '▶';
   if (type === 'audio') return '♪';
@@ -89,7 +87,7 @@ const FlipBook = forwardRef<FlipBookHandle, FlipBookProps>(function FlipBook(
 ) {
   const stageWrapperRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  const bookRef = useRef<HTMLDivElement | null>(null);
+  const bookHostRef = useRef<HTMLDivElement | null>(null);
   const pageFlipRef = useRef<PageFlipInstance | null>(null);
   const pageElsRef = useRef<HTMLElement[]>([]);
   const soundEnabledRef = useRef(soundEnabled);
@@ -111,82 +109,50 @@ const FlipBook = forwardRef<FlipBookHandle, FlipBookProps>(function FlipBook(
 
   useEffect(() => {
     let disposed = false;
-    let resizeObserver: ResizeObserver | null = null;
-    let resizeTimer: ReturnType<typeof setTimeout>;
 
     const theme = getTheme(themeId);
     const { w: ratioW, h: ratioH } = aspectRatioToWH(aspectRatio);
-    const basePageHeight = BASE_PAGE_HEIGHT;
-    const basePageWidth = Math.round((basePageHeight * ratioW) / ratioH);
+    const pageAspect = ratioW / ratioH;
 
-    function effectiveMode(containerWidth: number): 'single' | 'double' {
-      if (pageMode === 'double') return 'double';
-      if (pageMode === 'single') return 'single';
-      return containerWidth >= 760 ? 'double' : 'single';
-    }
-
-    function computeSize(mode: 'single' | 'double') {
-      const wrapper = stageWrapperRef.current;
-      if (!wrapper) return { pageW: basePageWidth, pageH: basePageHeight };
-      const rect = wrapper.getBoundingClientRect();
-      const availW = Math.max(220, rect.width - 24);
-      const availH = Math.max(220, rect.height - 24);
-      const factor = mode === 'double' ? 2 : 1;
-      const aspect = basePageWidth / basePageHeight;
-
-      let pageW = availW / factor;
-      let pageH = pageW / aspect;
-      if (pageH > availH) {
-        pageH = availH;
-        pageW = pageH * aspect;
-      }
-      pageW = Math.min(pageW, 620);
-      pageH = Math.min(pageH, 860);
-      return { pageW: Math.round(pageW), pageH: Math.round(pageH) };
-    }
+    // ---- Sizing strategy ---------------------------------------------
+    // Uses StPageFlip's own "stretch" sizing, which reads the container's
+    // live size on every internal resize tick — we never destroy/rebuild
+    // the instance for a plain window resize. A manually-computed "fixed"
+    // pixel size plus a destroy-and-rebuild-on-resize loop (the previous
+    // approach here) fights the library's own internal resize listener:
+    // PageFlip.destroy() never actually cancels its requestAnimationFrame
+    // render loop, only removes the DOM node, so a resize storm (e.g. a
+    // mobile browser's address bar showing/hiding) can leave two
+    // instances repositioning the same shared page elements at once.
+    // We only rebuild on an explicit mode change or new page set.
+    const maxHeight = 760;
+    const maxWidth = 620;
+    const minHeight = 260;
+    // minWidth also becomes a literal CSS min-width StPageFlip applies to
+    // the book element (×1 for portrait, ×2 for landscape) — not purely an
+    // internal threshold, so this is deliberately a moderate value per
+    // mode rather than an arbitrarily large "always force single" one,
+    // which would blow the element past the viewport.
+    const minWidth = pageMode === 'single' ? 340 : pageMode === 'auto' ? 380 : 220;
 
     async function build(startPage: number) {
       const { PageFlip } = await import('page-flip');
       if (disposed) return;
-      const stage = stageRef.current;
-      if (!stage) return;
+      if (!bookHostRef.current) return;
 
-      if (pageFlipRef.current) {
-        try {
-          pageFlipRef.current.destroy();
-        } catch {
-          /* no-op */
-        }
-        pageFlipRef.current = null;
-      }
-
-      const newBook = document.createElement('div');
-      newBook.className = 'kz-book';
-      pageElsRef.current.forEach((el) => newBook.appendChild(el));
-      stage.innerHTML = '';
-      stage.appendChild(newBook);
-      bookRef.current = newBook;
-
-      const wrapper = stageWrapperRef.current;
-      const containerWidth = wrapper ? wrapper.getBoundingClientRect().width : basePageWidth * 2;
-      const mode = effectiveMode(containerWidth);
-      const { pageW, pageH } = computeSize(mode);
-      const totalW = pageW * (mode === 'double' ? 2 : 1);
-
-      stage.style.width = `${totalW}px`;
-      stage.style.height = `${pageH}px`;
-      newBook.style.width = `${totalW}px`;
-      newBook.style.height = `${pageH}px`;
-
-      const pf = new PageFlip(newBook, {
-        width: pageW,
-        height: pageH,
-        size: 'fixed' as unknown as SizeType,
-        autoSize: false,
+      const pf = new PageFlip(bookHostRef.current, {
+        width: Math.round(pageAspect * maxHeight),
+        height: maxHeight,
+        size: 'stretch' as unknown as SizeType,
+        autoSize: true,
+        minWidth,
+        maxWidth,
+        minHeight,
+        maxHeight,
         showCover: true,
-        usePortrait: mode === 'single',
+        usePortrait: pageMode !== 'double',
         maxShadowOpacity: 0.6,
-        flippingTime: 620,
+        flippingTime: 700,
         mobileScrollSupport: true,
         swipeDistance: 25,
         startPage: Math.min(startPage, pages.length - 1),
@@ -211,27 +177,28 @@ const FlipBook = forwardRef<FlipBookHandle, FlipBookProps>(function FlipBook(
       setReady(true);
     }
 
+    const stage = stageRef.current;
+    if (stage && !bookHostRef.current) {
+      const host = document.createElement('div');
+      host.className = 'kz-book';
+      stage.appendChild(host);
+      bookHostRef.current = host;
+    }
+
     pageElsRef.current = pages.map((p) => buildPageElement(p, theme, (o) => onOverlayActivateRef.current(o)));
     build(currentIndexRef.current);
 
-    function scheduleRebuild() {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        build(currentIndexRef.current);
-      }, 150);
+    function onFullscreenChange() {
+      // Fullscreen toggles can change the container's size abruptly enough
+      // that a nudge helps; StPageFlip's own resize listener handles the
+      // ordinary case, this is just a safety net for that one transition.
+      setTimeout(() => pageFlipRef.current?.update(), 60);
     }
-
-    if (typeof ResizeObserver !== 'undefined' && stageWrapperRef.current) {
-      resizeObserver = new ResizeObserver(scheduleRebuild);
-      resizeObserver.observe(stageWrapperRef.current);
-    }
-    window.addEventListener('orientationchange', scheduleRebuild);
+    document.addEventListener('fullscreenchange', onFullscreenChange);
 
     return () => {
       disposed = true;
-      clearTimeout(resizeTimer);
-      resizeObserver?.disconnect();
-      window.removeEventListener('orientationchange', scheduleRebuild);
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
       if (pageFlipRef.current) {
         try {
           pageFlipRef.current.destroy();
@@ -240,6 +207,7 @@ const FlipBook = forwardRef<FlipBookHandle, FlipBookProps>(function FlipBook(
         }
         pageFlipRef.current = null;
       }
+      bookHostRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pages, themeId, aspectRatio, pageMode]);
