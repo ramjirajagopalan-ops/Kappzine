@@ -14,3 +14,8 @@ next-env.d.ts
 !/data/uploads/.gitkeep
 /public/uploads/*
 !/public/uploads/.gitkeep
+# The seed script's demo images are intentionally committed (not runtime
+# uploads) so the sample album has photos on a fresh Vercel deploy without
+# needing Blob storage configured first.
+!/public/uploads/seed-alex-priya/
+!/public/uploads/seed-alex-priya/**

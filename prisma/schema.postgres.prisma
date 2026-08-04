@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// SQLite has no native enum support, so PageMode ("single" | "double" | "auto")
+// and OverlayType ("video" | "audio" | "link") are plain strings, validated
+// in application code (see src/lib/validation.ts).
+
+model Album {
+  id            String   @id @default(cuid())
+  slug          String   @unique
+  title         String
+  coupleNames   String?
+  eventDate     DateTime?
+  description   String?
+  coverImageUrl String?
+  theme         String   @default("classic-brass")
+  hardCovers    Boolean  @default(true)
+  pageMode      String   @default("single")
+  soundEnabled  Boolean  @default(true)
+  aspectRatio   String   @default("3:4")
+  passwordHash  String?
+  published     Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  pages Page[]
+
+  @@index([slug])
+}
+
+model Page {
+  id        String   @id @default(cuid())
+  albumId   String
+  album     Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  order     Int
+  imageUrl  String
+  caption   String?
+  isCover   Boolean  @default(false)
+  density   String   @default("soft") // "hard" | "soft"
+  createdAt DateTime @default(now())
+
+  overlays Overlay[]
+
+  @@index([albumId, order])
+}
+
+model Overlay {
+  id        String      @id @default(cuid())
+  pageId    String
+  page      Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  type      String // "video" | "audio" | "link"
+  x         Float // percent 0-100, left edge
+  y         Float // percent 0-100, top edge
+  width     Float // percent 0-100
+  height    Float // percent 0-100
+  url       String
+  label     String?
+  autoplay  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([pageId])
+}

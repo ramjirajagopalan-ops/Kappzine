@@ -82,24 +82,38 @@ nginx, Tailscale, etc.) in front for HTTPS.
 
 ### Vercel
 
-Vercel's serverless functions have a read-only, ephemeral filesystem, so two
-defaults need to change:
+Vercel's serverless functions have a read-only, ephemeral filesystem, so
+SQLite (the local/self-hosted default) can't be used as-is. This repo ships
+a second schema, `prisma/schema.postgres.prisma`, and a `vercel-build`
+script that Vercel runs automatically instead of the normal `build` script
+— it points Prisma at the Postgres schema, syncs it (`prisma db push`), and
+re-seeds the demo album, all during the build. The seed album's photos are
+committed under `public/uploads/seed-alex-priya/` (not gitignored like real
+uploads are), so the demo works with **no Blob storage setup required**.
 
-1. **File storage** — add a [Vercel Blob](https://vercel.com/docs/storage/vercel-blob)
-   store and set `BLOB_READ_WRITE_TOKEN`. `src/lib/storage.ts` automatically
-   switches to Blob storage the moment that env var is present — no code
-   changes needed.
-2. **Database** — SQLite's on-disk file won't persist across deploys/regions.
-   Provision a hosted Postgres (Vercel Postgres, Neon, Supabase, etc.), then:
-   - In `prisma/schema.prisma`, change `provider = "sqlite"` to
-     `provider = "postgresql"`.
-   - Set `DATABASE_URL` to the Postgres connection string in the Vercel
-     project's environment variables.
-   - Run `npx prisma db push` once locally against that `DATABASE_URL` (or
-     wire up a migration step in your deploy pipeline) to create the schema.
+To deploy:
 
-Then set `ADMIN_PASSWORD` (or `ADMIN_PASSWORD_HASH`) and `AUTH_SECRET` in the
-Vercel project settings and deploy as a normal Next.js app.
+1. [vercel.com/new](https://vercel.com/new) → Import the GitHub repo, branch
+   `claude/wedding-flipbook-app-4hqhe6`.
+2. Before the first deploy, add a Postgres database: in the import screen
+   (or Project → Storage after creating the project), click **Create
+   Database → Postgres**. This auto-adds a connection-string env var —
+   open Project Settings → Environment Variables and make sure one is named
+   exactly `DATABASE_URL` (rename/duplicate it if Vercel named it something
+   like `POSTGRES_PRISMA_URL` instead; `prisma/schema.postgres.prisma` reads
+   `DATABASE_URL` specifically).
+3. Add two more env vars: `ADMIN_PASSWORD` (your admin login) and
+   `AUTH_SECRET` (any long random string).
+4. Click **Deploy**. The build runs `vercel-build`, which creates the tables
+   and seeds the sample "Alex & Priya" album automatically — no separate
+   `prisma db push` step needed.
+
+Uploading *new* photos through the admin dashboard on Vercel still needs
+real file storage (the filesystem is read-only at runtime): add
+[Vercel Blob](https://vercel.com/docs/storage/vercel-blob) and set
+`BLOB_READ_WRITE_TOKEN` whenever you want that to work — `src/lib/storage.ts`
+switches to Blob storage automatically the moment that env var is present.
+Not required just to view the demo album.
 
 ## Why the original prototype was blank
 
